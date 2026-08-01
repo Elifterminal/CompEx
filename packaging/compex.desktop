@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=CompEx
+GenericName=Computational Expressionism engine
+Comment=Music that composes itself from a mood and a seed
+Exec=__EXEC__
+Icon=compex
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+Keywords=music;generative;synthesis;equation;dubstep;algorithmic;
+StartupNotify=true

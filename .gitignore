@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Rendered tracks — regenerable from (seed, runtime, mood), and large.
+out/
+.playwright-mcp/

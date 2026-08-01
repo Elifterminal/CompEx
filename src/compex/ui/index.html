@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CompEx</title>
+<link rel="icon" href="/icon.svg">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <span class="mark">∿</span>
+    <div>
+      <h1>CompEx</h1>
+      <p>tell it how long and how it should feel — it writes the rest</p>
+    </div>
+  </div>
+  <div class="seedline">
+    <label for="seed">seed</label>
+    <input id="seed" type="number" min="0" max="2147483647" value="1203">
+    <button id="reseed" class="ghost" title="New random seed">⟳</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head"><h2>Emotional theme</h2><span id="theme-note" class="note"></span></div>
+    <div id="themes" class="chips"></div>
+
+    <div class="knob" id="runtime-knob">
+      <div class="knob-top"><span class="name">runtime</span><span class="val" id="v-duration">—</span></div>
+      <input type="range" id="k-duration" min="15" max="600" step="5" value="90">
+    </div>
+
+    <div class="row">
+      <label>save as</label>
+      <div id="formats" class="radios"></div>
+    </div>
+
+    <details id="advanced">
+      <summary>Mood axes — nudge it off the named themes</summary>
+      <div id="axes"></div>
+    </details>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>What it made</h2></div>
+    <pre id="summary" class="mono muted">nothing yet — press Make it.</pre>
+    <canvas id="wave" height="96"></canvas>
+    <div id="marks" class="marks"></div>
+  </section>
+</main>
+
+<section class="panel" id="formula-panel" hidden>
+  <div class="panel-head">
+    <h2>The formula it wrote</h2>
+    <div>
+      <button id="copy" class="ghost">copy</button>
+      <a id="dl-formula" class="ghost button" download>save .tex</a>
+    </div>
+  </div>
+  <pre id="formula" class="mono"></pre>
+  <p class="note">The SEED / RUNTIME / MOOD lines are the whole track — feed them back
+     and you get this exact piece again. Everything under them is what those three turned into.</p>
+</section>
+
+<section class="panel" id="delivery" hidden>
+  <div class="row">
+    <label for="to">email to</label>
+    <input id="to" type="email" value="bobbykershii@gmail.com" placeholder="recipient">
+    <input id="note" type="text" placeholder="optional note">
+  </div>
+</section>
+
+<!-- Pinned to the bottom of the viewport: these controls are never scrolled out of reach. -->
+<footer class="dock">
+  <button id="make" class="primary">Make it</button>
+  <a id="download" class="button disabled" download>Download</a>
+  <button id="send" disabled>Email it</button>
+  <span id="status" class="status">ready</span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

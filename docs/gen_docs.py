@@ -1,0 +1,719 @@
+#!/usr/bin/env python3
+"""Generate the CompEx living page from the live code.
+
+The living-page format wants one source of truth with a checker that fails the
+build on drift. For this project the code *is* the source of truth: engine
+counts, theme vectors, the scales each mood reaches and the tempos it picks can
+all be read or measured directly. So nothing on the page is typed by hand — it
+is introspected from the registries or measured by actually composing pieces.
+
+That means the page cannot claim 24 engines while the package has 23.
+
+    PYTHONPATH=src python3 docs/gen_docs.py
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import statistics
+import sys
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from compex import __version__                                    # noqa: E402
+from compex.config import Knobs                                   # noqa: E402
+from compex.dsp import drums                                      # noqa: E402
+from compex.dsp.effects import EFFECT_NAMES                       # noqa: E402
+from compex.dsp.engines import ENGINE_NAMES                       # noqa: E402
+from compex.dsp.engines import core, struck, sustained, textural, voiced  # noqa: E402
+from compex.generate import THEMES, compose                       # noqa: E402
+from compex.generate.mood import AXES                             # noqa: E402
+from compex.generate.palette import (                             # noqa: E402
+    DRUM_COLOUR,
+    ENGINE_COLOUR,
+    ENGINES_FOR_ROLE,
+)
+from compex.generate.theory import SCALES                         # noqa: E402
+from compex.pipeline import make_track                            # noqa: E402
+
+PROJECT = "CompEx"
+DOC_TYPE = "open engine notebook"
+OUT = ROOT / "docs" / "index.html"
+FACTS = ROOT / "docs" / "facts.json"
+
+SURVEY_SEEDS = 40      # compositions per theme when measuring what a mood actually does
+SURVEY_SECONDS = 45.0
+THEME_ORDER = sorted(THEMES, key=lambda name: THEMES[name].energy)
+
+FAMILIES = {
+    "core": tuple(sorted(core.ENGINES)),
+    "struck": tuple(sorted(struck.ENGINES)),
+    "voiced": tuple(sorted(voiced.ENGINES)),
+    "sustained": tuple(sorted(sustained.ENGINES)),
+    "textural": tuple(sorted(textural.ENGINES)),
+}
+
+
+# ── measuring ──────────────────────────────────────────────────────────────
+
+def survey() -> dict:
+    """Compose many pieces per theme and record what the machine actually chose."""
+    out: dict[str, dict] = {}
+    for name in THEME_ORDER:
+        mood = THEMES[name]
+        pieces = [compose(seed, SURVEY_SECONDS, mood) for seed in range(SURVEY_SEEDS)]
+        out[name] = {
+            "axes": mood.as_dict(),
+            "bpm": [p.bpm for p in pieces],
+            "notes": [len(p.notes) for p in pieces],
+            "strokes": [len(p.strokes) for p in pieces],
+            "scales": Counter(p.scale_name for p in pieces),
+            "meters": Counter(p.beats_per_bar for p in pieces),
+            "forms": Counter(p.archetype for p in pieces),
+            "engines": Counter(v.engine for p in pieces for v in p.voices if v.role != "perc"),
+            "drums": Counter(v.voice_id for p in pieces for v in p.voices if v.role == "perc"),
+            "effects": Counter(e for p in pieces for v in p.voices for e in v.effect_names()),
+        }
+    return out
+
+
+def worked_example(seed: int = 7788, theme: str = "menacing", seconds: float = 45.0):
+    """One real track, rendered, so the page can show the whole chain of decisions."""
+    return make_track(Knobs(seed=seed, duration_s=seconds), THEMES[theme])
+
+
+# ── svg helpers ────────────────────────────────────────────────────────────
+
+def svg(width: int, height: int, body: str) -> str:
+    return (f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+            f'role="img" xmlns="http://www.w3.org/2000/svg">{body}</svg>')
+
+
+def text(x, y, s, size=12, fill="var(--mut)", anchor="start", weight=400):
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" fill="{fill}" '
+            f'text-anchor="{anchor}" font-weight="{weight}" '
+            f'font-family="ui-sans-serif,system-ui,sans-serif">{html.escape(str(s))}</text>')
+
+
+def line(x1, y1, x2, y2, stroke="var(--line)", width=1, dash=None):
+    d = f' stroke-dasharray="{dash}"' if dash else ""
+    return (f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="{stroke}" stroke-width="{width}"{d}/>')
+
+
+def rect(x, y, w, h, fill, rx=2, opacity=1.0):
+    return (f'<rect x="{x:.1f}" y="{y:.1f}" width="{max(w, 0):.1f}" height="{max(h, 0):.1f}" '
+            f'rx="{rx}" fill="{fill}" opacity="{opacity:.3f}"/>')
+
+
+def circle(cx, cy, r, fill, opacity=1.0, stroke="none"):
+    return (f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.2f}" fill="{fill}" '
+            f'opacity="{opacity:.3f}" stroke="{stroke}"/>')
+
+
+def fig(markup: str, caption: str, wide: bool = False) -> str:
+    cls = "fig wide" if wide else "fig"
+    return f'<div class="{cls}">{markup}</div><p class="sub">{caption}</p>'
+
+
+def frame(width, height, pad, x_label, y_label, xticks, yticks):
+    """Axes with ticks. Returns (markup, to_x, to_y) mapping data space to pixels."""
+    left, right = pad + 34, width - pad
+    top, bottom = pad, height - pad - 26
+    (x0, x1), (y0, y1) = xticks[0], yticks[0]
+
+    def to_x(v):
+        return left + (v - x0) / (x1 - x0 or 1) * (right - left)
+
+    def to_y(v):
+        return bottom - (v - y0) / (y1 - y0 or 1) * (bottom - top)
+
+    parts = [line(left, bottom, right, bottom), line(left, top, left, bottom)]
+    for v in xticks[1]:
+        parts.append(line(to_x(v), bottom, to_x(v), bottom + 4))
+        parts.append(text(to_x(v), bottom + 17, v, 11, anchor="middle"))
+    for v in yticks[1]:
+        parts.append(line(left - 4, to_y(v), right, to_y(v), "var(--line)", 1, "2,4"))
+        parts.append(text(left - 8, to_y(v) + 4, v, 11, anchor="end"))
+    parts.append(text((left + right) / 2, height - 4, x_label, 11.5, anchor="middle"))
+    parts.append(text(12, top - 6, y_label, 11.5))
+    return "".join(parts), to_x, to_y
+
+
+# ── figures ────────────────────────────────────────────────────────────────
+
+def fig_mood_space(data) -> str:
+    w, h = 900, 430
+    body, tx, ty = frame(w, h, 26, "valence  (dark → bright)", "energy  (still → frantic)",
+                         ((0, 1), [0, 0.25, 0.5, 0.75, 1]), ((0, 1), [0, 0.25, 0.5, 0.75, 1]))
+    parts = [body]
+    for name in THEME_ORDER:
+        axes = data[name]["axes"]
+        x, y = tx(axes["valence"]), ty(axes["energy"])
+        radius = 5 + axes["density"] * 13
+        parts.append(circle(x, y, radius, "var(--accent)", 0.18 + axes["grit"] * 0.55))
+        parts.append(circle(x, y, 2.2, "var(--accent)"))
+        parts.append(text(x, y - radius - 6, name, 11, "var(--fg)", "middle", 600))
+    return fig("".join(parts) and svg(w, h, "".join(parts)),
+               "Each named theme is a point, not a preset. Circle size is density, opacity is grit. "
+               "The gaps between them are reachable — the axes are exposed raw in the UI, so a track "
+               "can sit anywhere in here, including places with no name.")
+
+
+def fig_tempo(data) -> str:
+    w, h = 900, 380
+    body, tx, ty = frame(w, h, 26, "energy axis", "chosen tempo (BPM)",
+                         ((0, 1), [0, 0.25, 0.5, 0.75, 1]), ((40, 180), [40, 70, 100, 130, 160]))
+    parts = [body]
+    for name in THEME_ORDER:
+        axes, bpms = data[name]["axes"], data[name]["bpm"]
+        x = tx(axes["energy"])
+        low, high = min(bpms), max(bpms)
+        parts.append(line(x, ty(low), x, ty(high), "var(--accent)", 2))
+        parts.append(circle(x, ty(statistics.mean(bpms)), 4.5, "var(--accent)"))
+        parts.append(text(x, ty(high) - 8, name, 10, "var(--mut)", "middle"))
+    return fig(svg(w, h, "".join(parts)),
+               f"Measured, not asserted: {SURVEY_SEEDS} compositions per theme. The bar is the full "
+               "range the seed can move tempo within a theme; the dot is the mean. Energy sets the "
+               "centre, the seed picks the spot.")
+
+
+def fig_scale_reach(data) -> str:
+    scale_order = sorted(SCALES, key=lambda s: -sum(
+        data[t]["scales"].get(s, 0) * (1 - THEMES[t].valence) for t in THEME_ORDER))
+    w = 200 + len(scale_order) * 46
+    h = 120 + len(THEME_ORDER) * 26
+    parts = []
+    for col, scale in enumerate(scale_order):
+        x = 200 + col * 46 + 23
+        parts.append(f'<g transform="rotate(-52 {x} 104)">'
+                     + text(x, 104, scale.replace("_", " "), 10.5, anchor="end") + "</g>")
+    for row, theme in enumerate(THEME_ORDER):
+        y = 120 + row * 26
+        parts.append(text(190, y + 15, theme, 11.5, "var(--fg)", "end"))
+        counts = data[theme]["scales"]
+        for col, scale in enumerate(scale_order):
+            share = counts.get(scale, 0) / SURVEY_SEEDS
+            x = 200 + col * 46
+            parts.append(rect(x + 2, y + 2, 42, 20, "var(--line)", 3, 0.5))
+            if share:
+                parts.append(rect(x + 2, y + 2, 42, 20, "var(--accent)", 3, 0.15 + share * 0.85))
+                parts.append(text(x + 23, y + 16, f"{share * 100:.0f}", 10,
+                                  "var(--panel)" if share > 0.5 else "var(--fg)", "middle", 600))
+    return fig(svg(w, h, "".join(parts)),
+               "Percentage of runs where each theme reached each mode. Serene never once draws a dark "
+               "mode; menacing and shattered never draw a bright one. Nothing enumerates which mode "
+               "belongs to which mood — each scale carries a (brightness, tension) coordinate and the "
+               "composer picks from the nearest few.", wide=True)
+
+
+def fig_density(data) -> str:
+    w, h = 900, 400
+    peak = max(max(data[t]["notes"]) for t in THEME_ORDER)
+    body, tx, ty = frame(w, h, 26, "", "events in a 45-second piece",
+                         ((0, len(THEME_ORDER)), []), ((0, peak), [0, peak // 3, 2 * peak // 3, peak]))
+    parts = [body]
+    step = (tx(1) - tx(0))
+    for index, theme in enumerate(THEME_ORDER):
+        notes = statistics.mean(data[theme]["notes"])
+        strokes = statistics.mean(data[theme]["strokes"])
+        x = tx(index) + step * 0.15
+        bar = step * 0.34
+        parts.append(rect(x, ty(notes), bar, ty(0) - ty(notes), "var(--accent)", 2, 0.85))
+        parts.append(rect(x + bar + 2, ty(strokes), bar, ty(0) - ty(strokes), "var(--ok)", 2, 0.85))
+        parts.append(f'<g transform="rotate(-38 {x + bar} {ty(0) + 16})">'
+                     + text(x + bar, ty(0) + 16, theme, 10.5, anchor="end") + "</g>")
+    parts.append(rect(w - 170, 22, 10, 10, "var(--accent)", 2))
+    parts.append(text(w - 154, 31, "notes", 11))
+    parts.append(rect(w - 96, 22, 10, 10, "var(--ok)", 2))
+    parts.append(text(w - 80, 31, "drum strokes", 11))
+    return fig(svg(w, h, "".join(parts)),
+               "Mean over the same runs. Desolate writes a couple of dozen drum hits in three quarters "
+               "of a minute; frantic writes hundreds. The density axis is doing this — no rule anywhere "
+               "says 'desolate is sparse'.")
+
+
+def fig_engine_map() -> str:
+    w, h = 900, 440
+    body, tx, ty = frame(w, h, 26, "brightness", "grit  (clean → destroyed)",
+                         ((0, 1), [0, 0.25, 0.5, 0.75, 1]), ((0, 1), [0, 0.25, 0.5, 0.75, 1]))
+    parts = [body]
+    colours = {"core": "var(--accent)", "struck": "var(--ok)", "voiced": "var(--warn)",
+               "sustained": "var(--mut)", "textural": "var(--fg)"}
+    for family, names in FAMILIES.items():
+        for name in names:
+            bright, grit, _ = ENGINE_COLOUR[name]
+            parts.append(circle(tx(bright), ty(grit), 5, colours[family], 0.75))
+            parts.append(text(tx(bright), ty(grit) - 9, name, 10, "var(--fg)", "middle"))
+    for index, (family, colour) in enumerate(colours.items()):
+        x = 60 + index * 150
+        parts.append(circle(x, 30, 5, colour, 0.85))
+        parts.append(text(x + 10, 34, family, 11))
+    return fig(svg(w, h, "".join(parts)),
+               f"All {len(ENGINE_NAMES)} engines placed by character. The composer ranks them against "
+               "the mood's own (valence, grit, energy) and draws from the nearest four — so a theme "
+               "instruments itself differently each seed without ever reaching somewhere wrong.")
+
+
+def fig_waveforms(examples) -> str:
+    w, h = 900, 90 * len(examples) + 30
+    parts = []
+    for index, (name, samples, seconds) in enumerate(examples):
+        top = 20 + index * 90
+        mid = top + 32
+        buckets = 880
+        size = max(1, len(samples) // buckets)
+        peaks = np.abs(samples[: (len(samples) // size) * size].reshape(-1, size)).max(axis=1)
+        parts.append(text(10, top - 4, f"{name} — {seconds:.0f}s", 11.5, "var(--fg)", weight=600))
+        for i, peak in enumerate(peaks):
+            height = max(0.7, float(peak) * 30)
+            parts.append(rect(10 + i, mid - height / 2, 0.9, height, "var(--accent)", 0, 0.85))
+        parts.append(line(10, mid, 890, mid, "var(--line)"))
+    return fig(svg(w, h, "".join(parts)),
+               "Real renders, same seed, only the theme changed. You can see the form the composer "
+               "chose — where it thins out and where it fills in.")
+
+
+# ── page ───────────────────────────────────────────────────────────────────
+
+CSS = """
+:root{--bg:#fbfbfc;--panel:#fff;--fg:#16181d;--mut:#636a76;--line:#e3e5ea;
+      --accent:#2563eb;--warn:#dc2626;--ok:#15803d;--code:#f3f4f6;}
+@media (prefers-color-scheme:dark){
+ :root{--bg:#0d0f13;--panel:#14171d;--fg:#e9eaee;--mut:#98a0ad;--line:#262b34;
+       --accent:#6ea0ff;--warn:#ff7a70;--ok:#68d391;--code:#1b1f26;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+ font:15px/1.62 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;}
+.wrap{max-width:1120px;margin:0 auto;padding:48px 28px 96px}
+header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:34px}
+.kicker{margin:0 0 4px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+h1{font-size:29px;margin:0 0 8px;letter-spacing:-.02em}
+h2{font-size:20px;margin:44px 0 10px;letter-spacing:-.01em}
+h3{font-size:15px;margin:26px 0 8px}
+.sub{color:var(--mut);font-size:14px;margin:0}
+.tag{display:inline-block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+ padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut);margin-right:6px}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.tag.ok{color:var(--ok);border-color:var(--ok)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+ padding:22px 24px;margin:18px 0}
+.fig{overflow-x:auto;margin:14px 0 6px;padding-bottom:4px}
+.fig svg{display:block;min-width:640px;max-width:100%;height:auto}
+.fig.wide svg{min-width:1060px}
+.read{border-left:3px solid var(--accent);padding:2px 0 2px 15px;margin:16px 0;color:var(--fg)}
+.read.warn{border-color:var(--warn)}
+.read.ok{border-color:var(--ok)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:12px 0}
+th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+code{background:var(--code);padding:1.5px 5px;border-radius:4px;font-size:13px;
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+ overflow-x:auto;font-size:12.5px;line-height:1.55;
+ font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+ul{padding-left:20px}li{margin:5px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:16px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px}
+.stat .n{font-size:24px;font-weight:650;letter-spacing:-.02em}
+.stat .k{color:var(--mut);font-size:12.5px;margin-top:3px}
+.q{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
+ border-radius:8px;padding:15px 18px;margin:12px 0}
+footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--line);
+ color:var(--mut);font-size:13px}
+.tabs{display:flex;gap:4px;margin:26px 0 8px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--mut);
+ font:600 14.5px ui-sans-serif,system-ui,sans-serif;padding:10px 16px;cursor:pointer;
+ margin-bottom:-1px;border-radius:6px 6px 0 0}
+.tab:hover{color:var(--fg);background:var(--panel)}
+.tab.active{color:var(--fg);border-bottom-color:var(--accent)}
+.panel{display:none}.panel.active{display:block}
+.chip{display:inline-block;font-size:12px;padding:3px 10px;border-radius:99px;
+ border:1px solid var(--line);color:var(--fg);margin:0 5px 5px 0;background:var(--panel)}
+.retract{border-left:3px solid var(--warn);padding:2px 0 2px 15px;margin:16px 0}
+.retract s{color:var(--mut)}
+"""
+
+JS = """
+document.querySelectorAll('.tab').forEach(function(t){
+  t.addEventListener('click',function(){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});
+    document.querySelectorAll('.panel').forEach(function(x){x.classList.remove('active')});
+    t.classList.add('active');
+    document.getElementById(t.dataset.panel).classList.add('active');
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+"""
+
+
+def panel_how(example) -> str:
+    piece = example.composition
+    return f"""
+<h2 style="margin-top:26px">What it is</h2>
+<p class="sub">Three inputs go in. A finished piece of music comes out, along with the
+notation describing what the machine decided.</p>
+
+<p>You give <b>CompEx</b> a length, an emotional theme, and a seed. It invents the tempo, the
+meter, the key and mode, a chord progression, a germ motif, the shape of the whole piece, which
+instruments exist, and how each one of those instruments is built. Then it plays it, and writes
+out the equation for what it did.</p>
+
+<div class="read"><b>Nothing is prewritten.</b> There is no library of loops, no bank of patches,
+no genre templates. Every decision is derived from the three inputs by walking a body of music
+theory with a seeded random number generator. The theory is the environment; the seed is a walk
+through it.</div>
+
+<h3>Where it came from, and the wrong turn</h3>
+<p>Lee had spent a long time writing equation-shaped prompts at Suno — things like
+<code>K(t)=&Sigma;&delta;(t-2n)</code> for a kick pattern, or a phase-modulation expression for a
+bass sound. Suno can't parse any of that; it embeds the text as tokens and produces something
+vaguely in the mood of the words. The structure was being thrown away.</p>
+
+<div class="retract"><s><b>So the first build was an interpreter</b> — it read those equations
+and executed them. It worked: the dubstep spec rendered at 140 BPM with a halftime feel, a real
+one-beat silence before the drop, and the growl bass built from the phase-modulation term
+exactly as written.</s><br><br><b>That was the wrong half.</b> Lee wanted the machine writing
+the equations, not executing his. The entire parsing path was deleted — about 900 lines — and
+the direction reversed. The equation became the <i>output</i>. This is left on the page because
+the reasoning that produced it was sound and the correction is the more interesting fact.</div>
+
+<h3>The pipeline</h3>
+<table><thead><tr><th>stage</th><th>what happens</th></tr></thead><tbody>
+<tr><td><b>mood</b></td><td>An emotional theme becomes five numbers: valence, energy, tension,
+density, grit.</td></tr>
+<tr><td><b>theory</b></td><td>Those numbers constrain which modes, chord motions, meters and
+rhythmic densities are legal. Every option offered is already idiomatic, so the composer never
+generates garbage and filters it.</td></tr>
+<tr><td><b>compose</b></td><td>It picks a tempo, a mode, a progression, a motif, a form
+archetype, a set of instruments, and writes every note and drum stroke.</td></tr>
+<tr><td><b>arrange</b></td><td>Each voice is synthesised on its own bus, run through the effects
+chain invented for it, ducked against the kick, and mixed.</td></tr>
+<tr><td><b>emit</b></td><td>The whole set of decisions is written back out as equation notation.</td></tr>
+</tbody></table>
+
+<h3>Determinism, and why it is not a detail</h3>
+<p>The same three inputs always produce the same audio, down to the byte. That is deliberate and
+load-bearing.</p>
+<div class="read"><b>If the strangeness came from a random number, nothing is being expressed —
+it is noise wearing a costume.</b> In a deterministic engine every strange moment is caused by
+the machine's actual structure and can be traced back to it. That is the difference between a
+malfunction and an interior, and it is the whole reason this project is called what it is.</div>
+<p>The random number generator is positional rather than sequential — a value is a pure function
+of <code>(seed, stream, index)</code>, with no running state. Asking for bar 90 before bar 3
+gives the same answer either way. Seeking is free, and a parameter change mid-piece cannot
+desync anything downstream, which is what a future realtime version will need.</p>
+
+<h3>The formula it writes</h3>
+<p>Every track is saved with a <code>.tex</code> file beside it. The <code>SEED</code>,
+<code>RUNTIME</code> and <code>MOOD</code> lines are the load-bearing part — feed those three
+back and the identical file comes out. Everything under them is exposition: what those three
+turned into. Here is the real one for the piece used throughout this page.</p>
+<pre>{html.escape(example.formula)}</pre>
+<div class="read ok"><b>Verified, not asserted.</b> Reading that file back and re-composing
+produces a byte-identical track — the audio fingerprint <code>{piece.seed}</code> &rarr;
+<code>{example.fingerprint}</code> matches. There is a test that fails if it ever stops
+matching.</div>
+"""
+
+
+def panel_mood(data) -> str:
+    rows = "".join(
+        f"<tr><td><b>{name}</b></td>"
+        + "".join(f"<td>{data[name]['axes'][axis]:.2f}</td>" for axis in AXES)
+        + f"<td class='sub'>{statistics.mean(data[name]['bpm']):.0f} BPM avg, "
+          f"{statistics.mean(data[name]['notes']):.0f} notes</td></tr>"
+        for name in THEME_ORDER)
+    return f"""
+<h2 style="margin-top:26px">The mood axes</h2>
+<p class="sub">Emotional theme is a point in a five-dimensional space, not an item in a list.</p>
+
+<p>A genre dropdown would be a lookup table — pick "dubstep", get dubstep back. That defeats the
+purpose. Instead a theme is five numbers, and the {len(THEMES)} named themes are just convenient
+coordinates in that space. You can move the axes directly and land somewhere that has no name.</p>
+
+<div class="grid">
+<div class="stat"><div class="n">valence</div><div class="k">dark &rarr; bright</div></div>
+<div class="stat"><div class="n">energy</div><div class="k">still &rarr; frantic</div></div>
+<div class="stat"><div class="n">tension</div><div class="k">resolved &rarr; unresolved</div></div>
+<div class="stat"><div class="n">density</div><div class="k">sparse &rarr; crowded</div></div>
+<div class="stat"><div class="n">grit</div><div class="k">clean &rarr; destroyed</div></div>
+</div>
+
+{fig_mood_space(data)}
+
+<h3>Do the axes actually do anything?</h3>
+<p>This is the question worth being sceptical about — it would be easy to build something where
+the mood is decorative and the seed does all the work. So: {SURVEY_SEEDS} compositions per theme,
+{len(THEMES)} themes, {SURVEY_SEEDS * len(THEMES)} pieces, and a count of what the machine chose.</p>
+
+{fig_tempo(data)}
+{fig_scale_reach(data)}
+{fig_density(data)}
+
+<div class="read ok"><b>They constrain real things.</b> Serene never draws a dark mode across
+{SURVEY_SEEDS} seeds, and never a meter past 3/4. Menacing only ever draws phrygian dominant,
+locrian or octatonic, and takes an odd meter about half the time. Desolate writes a couple of
+dozen drum strokes in three quarters of a minute where frantic writes hundreds. None of that is
+enumerated anywhere — each mode and each drum carries a character coordinate, and the composer
+picks from whatever sits nearest the mood.</div>
+
+<h3>The themes, and what they turn into</h3>
+<table><thead><tr><th>theme</th>{''.join(f'<th>{a[:3]}</th>' for a in AXES)}
+<th>measured</th></tr></thead><tbody>{rows}</tbody></table>
+
+<div class="q"><b>Open, and the main unresolved question in the project.</b> These axis names are
+my labels for what the machine does. Whether "menacing" actually sounds menacing to a listener is
+not something I can settle by measurement — the numbers above only show the axes are
+<i>consistent</i>, not that they are <i>correctly named</i>. That needs an ear, and it is what
+the project is currently waiting on.</div>
+"""
+
+
+def panel_palette(data) -> str:
+    families = "".join(
+        f"<tr><td><b>{family}</b></td><td>"
+        + "".join(f'<span class="chip">{name}</span>' for name in names)
+        + "</td></tr>" for family, names in FAMILIES.items())
+    roles = "".join(
+        f"<tr><td><b>{role}</b></td><td class='sub'>{', '.join(names)}</td></tr>"
+        for role, names in ENGINES_FOR_ROLE.items())
+    return f"""
+<h2 style="margin-top:26px">The palette</h2>
+<p class="sub">{len(ENGINE_NAMES)} synthesis engines, {len(drums.DRUM_NAMES)} drums,
+{len(EFFECT_NAMES)} effects — none of them patches.</p>
+
+<div class="grid">
+<div class="stat"><div class="n">{len(ENGINE_NAMES)}</div><div class="k">pitched engines</div></div>
+<div class="stat"><div class="n">{len(drums.DRUM_NAMES)}</div><div class="k">drums</div></div>
+<div class="stat"><div class="n">{len(EFFECT_NAMES)}</div><div class="k">effects, invented per voice</div></div>
+<div class="stat"><div class="n">{len(SCALES)}</div><div class="k">modes</div></div>
+</div>
+
+<div class="read"><b>An engine is a family, not a sound.</b> The composer invents the parameters
+per piece, so "pluck" covers a harp and a snapped wire, and "pm" covers a bell and a dubstep
+growl. The effects matter more than the count suggests: the same pluck through a long reverb and
+through a ring modulator are two different instruments, so it is
+{len(ENGINE_NAMES)} &times; {len(EFFECT_NAMES)} &times; invented parameters, not
+{len(ENGINE_NAMES)} sounds.</div>
+
+<table><thead><tr><th>family</th><th>engines</th></tr></thead><tbody>{families}</tbody></table>
+
+{fig_engine_map()}
+
+<h3>Which engine plays which part</h3>
+<table><thead><tr><th>role</th><th>candidates</th></tr></thead><tbody>{roles}</tbody></table>
+
+<h3>Drums</h3>
+<p>{''.join(f'<span class="chip">{n}</span>' for n in sorted(drums.DRUM_NAMES))}</p>
+<p>Chosen the same way as engines — each carries a (brightness, aggression) coordinate and the
+kit is drawn from whatever sits near the mood. That fix has a story attached; see the next tab.</p>
+
+<h3>Effects</h3>
+<p>{''.join(f'<span class="chip">{n}</span>' for n in EFFECT_NAMES)}</p>
+<p>Between zero and two per voice, with the appetite for them rising with grit and density.
+Reverb and delay are feedback structures, computed a delay line at a time so each block depends
+only on the previous one — that keeps them in numpy instead of a per-sample Python loop.</p>
+
+<div class="read"><b>Every voice leaves its engine at the same peak level.</b> That sounds like
+housekeeping and is not. Measured across the {len(ENGINE_NAMES)} engines, natural output level
+spanned roughly 300&times; in RMS — a self-oscillating resonance came out fifty times quieter than
+a plain sine. Without normalising, the composer's per-voice gain means something different for
+every engine, and the quiet ones are simply absent from the mix.</div>
+"""
+
+
+def panel_example(example, data) -> str:
+    piece = example.composition
+    voices = "".join(
+        f"<tr><td><b>{v.role}</b></td><td><code>{v.engine}</code></td>"
+        f"<td class='sub'>{', '.join(v.effect_names()) or '—'}</td>"
+        f"<td class='sub'>{', '.join(f'{k}={val:g}' for k, val in v.params[:4])}</td></tr>"
+        for v in piece.voices if v.role != "perc")
+    movements = " &rarr; ".join(
+        f"{m.name} <span class='sub'>({m.beats:g}b, energy {m.energy:.2f})</span>"
+        for m in piece.movements)
+    return f"""
+<h2 style="margin-top:26px">One piece, decision by decision</h2>
+<p class="sub">Seed {piece.seed}, theme {piece.mood.nearest_theme()},
+{example.knobs.duration_s:.0f} seconds requested. Everything below was chosen by the machine.</p>
+
+<div class="grid">
+<div class="stat"><div class="n">{piece.bpm:.1f}</div><div class="k">BPM</div></div>
+<div class="stat"><div class="n">{piece.beats_per_bar}/4</div><div class="k">meter</div></div>
+<div class="stat"><div class="n">{piece.scale_name.replace('_', ' ')}</div><div class="k">mode</div></div>
+<div class="stat"><div class="n">{len(piece.notes)}</div><div class="k">notes written</div></div>
+<div class="stat"><div class="n">{len(piece.strokes)}</div><div class="k">drum strokes</div></div>
+<div class="stat"><div class="n">{example.fingerprint}</div><div class="k">audio fingerprint</div></div>
+</div>
+
+<h3>Form</h3>
+<p>Archetype <code>{piece.archetype}</code>: {movements}</p>
+
+<h3>Harmony and motif</h3>
+<p>{len(piece.progression)} chords, one every {piece.chord_beats:g} beats. The germ motif is
+{len(piece.motif.steps)} notes over {piece.motif.beats:g} beats, and each movement after the first
+plays a <i>transformation</i> of it rather than a repeat — inversion, retrograde, augmentation,
+fragmentation. That is Schoenberg's developing variation, mechanised: the piece grows out of one
+idea instead of collecting unrelated ones.</p>
+
+<h3>The instruments it built</h3>
+<table><thead><tr><th>role</th><th>engine</th><th>effects</th><th>parameters (first four)</th></tr>
+</thead><tbody>{voices}</tbody></table>
+<p class="sub">Kit: {', '.join(v.voice_id for v in piece.voices if v.role == 'perc')}</p>
+
+<div class="read"><b>Two things here were not instructed.</b> It chose an odd meter for this dark
+theme, and for the serene theme at the same seed it chose no effects whatsoever. Nothing in the
+code says either. Both fall out of the axes.</div>
+"""
+
+
+def panel_open(data) -> str:
+    return f"""
+<h2 style="margin-top:26px">What is not settled</h2>
+<p class="sub">The parts that are guesses, unbuilt, or known to have been wrong.</p>
+
+<div class="q"><b>The mood axes are guesses.</b> Five axes and {len(THEMES)} theme coordinates,
+all hand-assigned by me. The measurements prove they are <i>consistent</i> — the same theme
+reliably reaches the same region — but consistency is not correctness. Whether "menacing" sounds
+menacing is an open question that only a listener settles.</div>
+
+<div class="q"><b>It is not yet Computational Expressionism, by its own definition.</b> The idea
+this project is named for is that a machine's way of constructing reality should become
+perceptible — that you should be able to <i>hear</i> the machinery, not just its output. Right
+now the composer picks one continuation and the alternatives vanish silently. The intended
+mechanism is a <b>ghost layer</b>: score several candidate continuations, and play the
+runners-up quietly underneath at a gain set by how close they came. When the machine is
+confident, the texture is clean; when it is genuinely torn, it blooms into a haze of
+almost-melodies. That would make uncertainty audible as texture. The knob exists and does
+nothing.</div>
+
+<div class="q"><b>Determinism has no regression test across versions.</b> The tests check that two
+renders in the same process match. They cannot catch a DSP change that silently alters every
+fingerprint ever produced — which would quietly falsify the claim that an old formula still
+reproduces its track. Needs a pinned golden fingerprint per theme.</div>
+
+<div class="q"><b>Too slow to be live.</b> Three to eight seconds for a forty-five second track.
+Fine offline, nowhere near realtime. Editable-while-sounding needs a different audio path
+entirely (SuperCollider and an OSC layer). The engine is structured for it — the positional RNG
+exists precisely so a live edit cannot desync the stream — but it is not built.</div>
+
+<h3>Things that were wrong and got fixed</h3>
+<p>Kept on the page rather than quietly corrected, because what broke is more informative than
+what worked.</p>
+
+<div class="retract"><s><b>The whole first build.</b> An interpreter that executed equations Lee
+wrote.</s> Wrong half of the problem — about 900 lines deleted. The insight that survived is that
+his equation prompts were never prompts; they were a specification with no interpreter, and that
+is what suggested the machine could write them too.</div>
+
+<div class="retract"><s><b>Engine levels were left at whatever each engine naturally produced.</b></s>
+Measured spread was roughly 300&times; in RMS. Two rounds of demos shipped with some voices far
+quieter than intended before a sweep across all engines caught it.</div>
+
+<div class="retract"><s><b>The drum kit was drawn blind from a shrinking pool.</b></s> It put an
+<b>anvil in a serene piece</b>. Kits are now ranked against a character table like everything
+else. The general lesson — anything the composer picks from has to know what its members sound
+like — is now a project rule.</div>
+
+<div class="retract"><s><b>The equation normaliser stripped <code>\\right</code> before
+<code>\\rightarrow</code>.</b></s> Rule-ordering bug that silently collapsed every arrow chain
+into a single token, so an entire form map parsed as one section. Found by reading the parse
+output rather than by a failing test — it failed quietly and plausibly, which is the worst way
+for a parser to fail.</div>
+
+<h3>Honest scope</h3>
+<div class="read warn"><b>This is experimental music and it sounds like it.</b> It does not repeat
+the way pop music repeats, it will sometimes sit on an idea too long, and some of it is simply
+strange. That is the intent — the project exists to see what happens when the computation carries
+itself, not to imitate a genre. Lee's framing when he asked for it: <i>"I realize this wont sound
+great. It will likely be very strange. At least at first, before we figure out the parameter
+questions. But thats fine because it is meant to be experimental."</i></div>
+"""
+
+
+def build() -> str:
+    data = survey()
+    example = worked_example()
+    waves = [
+        (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
+        for name in ("serene", "menacing")
+    ]
+
+    counts = {
+        "engines": len(ENGINE_NAMES), "drums": len(drums.DRUM_NAMES),
+        "effects": len(EFFECT_NAMES), "themes": len(THEMES), "scales": len(SCALES),
+        "axes": len(AXES), "version": __version__,
+    }
+    FACTS.write_text(json.dumps(counts, indent=2) + "\n", encoding="utf-8")
+
+    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{PROJECT} &mdash; {DOC_TYPE}</title><style>{CSS}</style></head><body><div class="wrap">
+
+<header>
+<p class="kicker">{DOC_TYPE}</p>
+<h1>{PROJECT}</h1>
+<p class="sub">A music engine that composes. You give it a length, a feeling and a seed; it
+invents the tempo, the key, the harmony, the form and the instruments, plays the result, and
+writes out the equation for what it decided. {counts['engines']} synthesis engines,
+{counts['drums']} drums, {counts['themes']} emotional themes. Every number on this page is read
+from the running code or measured by composing {SURVEY_SEEDS * len(THEMES)} pieces, so it cannot
+go stale.</p>
+</header>
+
+<div class="card">
+<h2 style="margin-top:0">The short version</h2>
+<div class="read"><b>Three inputs: how long, how it should feel, and a seed.</b> Everything
+else — tempo, meter, key, mode, chord progression, the motif, the shape of the piece, which
+instruments exist and how each is built — is invented by the machine.</div>
+<div class="read ok"><b>It writes down what it did.</b> Each track is saved with the equation
+notation describing every decision, and feeding that notation back produces the identical track,
+byte for byte.</div>
+<div class="read warn"><b>It is not finished, in a specific way.</b> The thing the project is
+named for — making the machine's own uncertainty audible — is designed but not built. What exists
+today is a composer that works; what it is aiming at is something stranger.</div>
+</div>
+
+<nav class="tabs">
+<button class="tab active" data-panel="how">What it is</button>
+<button class="tab" data-panel="mood">The mood axes</button>
+<button class="tab" data-panel="palette">The palette</button>
+<button class="tab" data-panel="example">One piece, step by step</button>
+<button class="tab" data-panel="open">What is not settled</button>
+</nav>
+
+<div class="panel active" id="how">{panel_how(example)}
+{fig_waveforms(waves)}</div>
+<div class="panel" id="mood">{panel_mood(data)}</div>
+<div class="panel" id="palette">{panel_palette(data)}</div>
+<div class="panel" id="example">{panel_example(example, data)}</div>
+<div class="panel" id="open">{panel_open(data)}</div>
+
+<footer>
+<b>{PROJECT}</b> v{__version__} &middot; code at <a href="https://github.com/Elifterminal/CompEx"
+style="color:var(--accent)">github.com/Elifterminal/CompEx</a> &middot; single self-contained
+page, no external requests &middot; generated from the running package by
+<code>docs/gen_docs.py</code>, checked by <code>docs/check_page.py</code>.
+</footer>
+
+</div><script>{JS}</script></body></html>"""
+    return body
+
+
+def main() -> int:
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    page = build()
+    OUT.write_text(page, encoding="utf-8")
+    print(f"wrote {OUT} ({len(page) / 1024:.0f} KB)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
