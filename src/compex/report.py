@@ -156,6 +156,27 @@ def ledger(composition: Composition) -> dict:
     }
 
 
+def hindsight(composition: Composition) -> dict | None:
+    """What the ending gave back to the beginning."""
+    reveal = composition.reveal
+    if reveal is None or not reveal.phrases:
+        return None
+    recalls = [choice for choice in composition.melodies
+               if choice.chosen.origin.startswith("recall")]
+    spb = composition.seconds_per_beat
+    return {
+        "then": round(reveal.then, 1),
+        "now": round(reveal.now, 1),
+        "literal": round(reveal.literal, 1),
+        "saved": round(reveal.saved, 1),
+        "share": round(reveal.share, 4),
+        "phrases": reveal.phrases,
+        "note": reveal.describe(),
+        "recalls": [{"at": round(choice.at_beat * spb, 2), "origin": choice.chosen.origin}
+                    for choice in recalls],
+    }
+
+
 def taste(composition: Composition) -> dict:
     """What the composer listens for now, against what it started out listening for."""
     now, start = composition.taste, composition.opening_taste

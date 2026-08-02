@@ -194,9 +194,33 @@ function drawChoices(data) {
     : "";
 
   $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  drawHindsight(data.hindsight);
   drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
+}
+
+function drawHindsight(reveal) {
+  const host = $("hindsight");
+  if (!reveal) { host.innerHTML = `<p class="note">not measured — too short</p>`; return; }
+  const bar = Math.min(100, reveal.share * 300);   // 33% would be a total re-explanation
+  const recalls = reveal.recalls.length
+    ? reveal.recalls.map((r) => `<span class="chip">${r.origin} at ${r.at}s</span>`).join("")
+    : `<span class="note">it never reached back for a specific earlier phrase</span>`;
+  return void (host.innerHTML = `
+    <div class="reveal">
+      <span class="rname">then</span>
+      <span class="rbar"><i style="width:100%"></i></span>
+      <span class="rval">${reveal.then} symbols</span>
+    </div>
+    <div class="reveal saved">
+      <span class="rname">in hindsight</span>
+      <span class="rbar"><i style="width:${(reveal.now / reveal.then) * 100}%"></i></span>
+      <span class="rval">${reveal.now} symbols</span>
+    </div>
+    <p class="note">${reveal.note} — measured over ${reveal.phrases} opening phrases,
+       against ${reveal.literal} to spell them all out.</p>
+    <div>${recalls}</div>`);
 }
 
 function drawLedger(ledger) {

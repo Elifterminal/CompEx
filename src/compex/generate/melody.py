@@ -35,6 +35,8 @@ from compex.generate.evolve import Drives
 from compex.generate.mood import Mood
 from compex.generate.promise import Ledger
 from compex.generate.theory import Motif, degree_semitone
+from compex import measure
+from compex.measure import Shape
 
 #: How many lines it will imagine before choosing one. Set both to 1 and the
 #: audition collapses to a recital again — which is the switch that makes the
@@ -42,6 +44,8 @@ from compex.generate.theory import Motif, degree_semitone
 CANDIDATES_MIN, CANDIDATES_MAX = 2, 7
 
 LEAP_DEGREES = 2      # a move of more than this many scale degrees is a leap
+LATE = 0.55           # before this far through a piece, revealing has nothing to reveal
+REVEAL_FULL = 0.12    # one phrase accounting for this much of the opening is as good as it gets
 STRAY_BAND = 0.25     # a weight this far from where it started counts as having strayed
 TASTE_BOUNDS = (0.02, 3.20)   # hard limits on a weight — not where it starts, where it stops
 LEARN_RATE = 0.22     # how fast a complaint moves the weight behind it
@@ -64,6 +68,7 @@ TRUST_RATE = 0.05     # how fast a criterion that keeps deciding auditions earns
 TAUGHT_BY: dict[str, tuple[tuple[str, int], ...]] = {
     "post_skip_reversal": (("answer", +1), ("promise", +1)),
     "motif_presence": (("kinship", +1),),
+    "revelation": (("reveal", +1),),
     "novelty": (("freshness", +1),),
     "repetition": (("freshness", -1), ("promise", -1)),
     "register_spread": (("span", +1),),
@@ -131,6 +136,13 @@ CRITERIA_DETAIL: tuple[Criterion, ...] = (
         "note rate the movement's energy actually wants.",
     ),
     Criterion(
+        "reveal", "minimum description length",
+        "How much cheaper playing this would make everything already played. A line that turns "
+        "out to be three earlier strange ones rotated makes the piece's own past describable by "
+        "a simpler rule than it needed at the time. Only asked late, because there is nothing "
+        "to reveal in the first movement.",
+    ),
+    Criterion(
         "promise", "Meyer's expectation, carried",
         "What it does about everything the piece has left hanging. Settling a ripe obligation "
         "scores highest, carrying one scores next, and settling one nobody is waiting for yet "
@@ -178,6 +190,10 @@ class Setting:
     approach: int | None = None                     # scale degree the last phrase ended on
     ledger: Ledger = Ledger()                       # what the piece owes so far
     now_beat: float = 0.0                           # where we are, for judging maturity
+    position: float = 0.0                           # how far through the piece, 0..1
+    past: tuple[Shape, ...] = ()                    # material already played, to be re-explained
+    vocabulary: tuple[Shape, ...] = ()              # what the piece can already refer to
+    past_cost: tuple[float, ...] = ()               # what each of those cost to write at the time
 
     def chord_tones(self) -> frozenset[int]:
         """The chord's own degrees, folded into one octave of the scale."""
@@ -198,6 +214,7 @@ class Taste:
     span: float = 0.7
     cadence: float = 0.8
     gait: float = 0.9
+    reveal: float = 1.0
     promise: float = 1.0
     curiosity: float = 0.5   # not a criterion — how many lines it bothers to imagine
 
@@ -259,6 +276,9 @@ def initial_taste(mood: Mood) -> Taste:
         # A weight of zero drops the criterion out of the audition entirely
         # rather than sitting in it as a constant, so switching the ledger off
         # gives back exactly the music that existed before there was one.
+        # Revealing is a late-piece appetite, and a bright piece wants it more:
+        # a dark one is often *about* not explaining itself.
+        reveal=(0.45 + mood.valence * 0.75) if measure.ENABLED else 0.0,
         promise=(0.35 + mood.tension * 0.60) if promise.ENABLED else 0.0,
         curiosity=0.30 + mood.tension * 0.45,
     )
@@ -306,6 +326,8 @@ def propose(seed: int, movement: int, index: int, setting: Setting, taste: Taste
                   origin="germ", generation=parent.generation if parent else 0)
 
     field: list[Phrase] = [germ]
+    if setting.position >= LATE and setting.past:
+        field.append(_recall(setting, seed, f"rec-{movement}-{index}"))
     if parent is not None:
         if setting.approach is not None:
             field.append(_connect(parent, seed, f"con-{movement}-{index}", setting))
@@ -436,6 +458,34 @@ def _mutate(parent: Phrase, seed: int, stream: str, slot: int, setting: Setting)
                   origin=kind, generation=parent.generation + 1)
 
 
+def _recall(setting: Setting, seed: int, stream: str) -> Phrase:
+    """Reach back for a specific early phrase — the one most in need of explaining.
+
+    The germ is always in the field, but the germ is not the only thing a piece
+    said early on. Without this, nothing in the audition ever proposes bringing
+    *that* phrase back, and the composer cannot make its own opening cheaper to
+    describe however much it wants to. It picks the expensive one — a phrase
+    that was already easy to describe has nothing left for a return to buy.
+    """
+    costs = setting.past_cost if len(setting.past_cost) == len(setting.past) else ()
+    if costs:
+        target = max(range(len(setting.past)), key=lambda index: costs[index])
+    else:
+        target = int(rng.uniform(seed, f"{stream}-pick", 0) * len(setting.past))
+    shape = setting.past[target]
+
+    steps = list(shape.steps)
+    turn = rng.pick(seed, f"{stream}-turn", 0, ("as it was", "inverted", "retrograde"))
+    if turn == "inverted":
+        pivot = steps[0]
+        steps = [2 * pivot - step for step in steps]
+    elif turn == "retrograde":
+        steps = steps[::-1]
+
+    return Phrase(steps=tuple(steps), rhythm=tuple(shape.rhythm),
+                  origin=f"recall {turn}", generation=0)
+
+
 def _connect(parent: Phrase, seed: int, stream: str, setting: Setting) -> Phrase:
     """The parent line, moved so it starts a step from where the last one stopped.
 
@@ -515,6 +565,7 @@ def assess(phrase: Phrase, setting: Setting) -> dict[str, float]:
         "span": _span(phrase, setting),
         "cadence": _cadence(phrase, tones, span),
         "gait": _gait(phrase, setting),
+        "reveal": _reveal(phrase, setting),
         "promise": _promise(phrase, setting),
     }
 
@@ -642,6 +693,26 @@ def _gait(phrase: Phrase, setting: Setting) -> float:
     want_rate = 0.5 + setting.energy * 2.5 * setting.drives.density_bias
     fit = max(0.0, 1.0 - abs(rate - want_rate) / max(want_rate, 1e-6))
     return max(0.0, (0.45 * fill + 0.55 * fit) - overrun * 0.5)
+
+
+def _reveal(phrase: Phrase, setting: Setting) -> float:
+    """How much this candidate would simplify the piece's own past.
+
+    Nothing to reveal early on, so it stays neutral until the piece is past
+    :data:`LATE`. After that, a candidate that several earlier phrases turn out
+    to be transformations of buys the whole opening a cheaper description, and
+    that is the thing worth reaching for — the ending making the beginning
+    intelligible rather than merely stopping.
+    """
+    if setting.position < LATE or not setting.past:
+        return 0.5
+    shape = Shape(label="candidate", steps=phrase.steps, rhythm=phrase.rhythm,
+                  at_beat=setting.now_beat)
+    # Scaled against what a single phrase can realistically account for. Raw,
+    # the best candidate in a field scores about 0.06 against other criteria
+    # that run 0..1, so it could never outvote anything and the criterion was
+    # measurable but powerless — which is its own kind of decoration.
+    return min(1.0, measure.explains(shape, setting.past, setting.past_cost) / REVEAL_FULL)
 
 
 def _promise(phrase: Phrase, setting: Setting) -> float:

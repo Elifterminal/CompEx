@@ -153,6 +153,51 @@ def choice_survey() -> dict:
 PURPOSE_THEMES = ("serene", "hypnotic", "menacing", "frantic")
 PURPOSE_SECONDS = 240.0
 
+HINDSIGHT_THEMES = ("serene", "wistful", "hypnotic", "menacing", "frantic")
+HINDSIGHT_SECONDS = 300.0
+
+
+def hindsight_survey() -> dict:
+    """Measure what each piece's ending gave back to its beginning.
+
+    Three runs, because there are three separable claims and conflating them
+    would let the page take credit for something it did not do: the
+    measurement itself, the *ability* to reach back for a specific early
+    phrase, and the composer actually caring about doing so.
+    """
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    from compex.generate import melody
+
+    real = melody.initial_taste
+
+    def run(weight: float | None) -> list:
+        if weight is None:
+            return [compose(7788, HINDSIGHT_SECONDS, THEMES[name])
+                    for name in HINDSIGHT_THEMES]
+        with patch("compex.generate.melody.initial_taste",
+                   lambda mood: replace(real(mood), reveal=weight)):
+            return [compose(7788, HINDSIGHT_SECONDS, THEMES[name])
+                    for name in HINDSIGHT_THEMES]
+
+    caring = run(None)
+    indifferent = run(0.0)
+    shares = [piece.reveal.share for piece in caring]
+
+    return {
+        "pieces": caring,
+        "example": caring[HINDSIGHT_THEMES.index("hypnotic")],
+        "share": statistics.mean(shares),
+        "best": max(shares),
+        "worst": min(shares),
+        "indifferent": statistics.mean([p.reveal.share for p in indifferent]),
+        "recalls": sum(1 for piece in caring for choice in piece.melodies
+                       if choice.chosen.origin.startswith("recall")),
+        "phrases": sum(piece.reveal.phrases for piece in caring),
+        "themes": len(HINDSIGHT_THEMES),
+    }
+
 
 def purpose_survey() -> dict:
     """Measure the ledger, and measure the piece with it switched off.
@@ -937,7 +982,7 @@ this needed now exists and the candidates now exist; what is missing is the mixi
 """
 
 
-def panel_purpose(survey) -> str:
+def panel_purpose(survey, hindsight) -> str:
     piece = survey["example"]
     now = piece.total_beats
     kinds = "".join(
@@ -1038,17 +1083,47 @@ timescale nothing is currently listening at. Measuring the benefit needs the pie
 notice that its own past became simpler — which is the next thing on the list, not a thing that
 exists.</div>
 
+<h3>Built since: what the ending gave back to the beginning</h3>
+<p>The opening is priced twice, in symbols, in the same notation that regenerates the audio. Once
+using only what existed while it was being written — each phrase against the germ and the phrases
+before it. Then again with the rest of the piece available to refer to. A phrase can be spelled
+out note by note, or written as "that one, inverted, with the third interval a step wider", and
+whichever is shorter is what it costs.</p>
+
+<div class="read"><b>Hindsight means the ending, not the neighbour.</b> The first version let a
+phrase be explained by the one after it, which is a lineage rather than a revelation — and since
+every phrase here descends from the last, that read as 16% compression before the piece had done
+anything. Restricting it to what the <i>second half</i> explains about the first took the number from
+inflated to real.</div>
+
+<div class="grid">
+<div class="stat"><div class="n">{hindsight['share'] * 100:.0f}%</div>
+  <div class="k">of the opening explained by the ending</div></div>
+<div class="stat"><div class="n">{hindsight['best'] * 100:.0f}%</div><div class="k">best piece</div></div>
+<div class="stat"><div class="n">{hindsight['worst'] * 100:.0f}%</div><div class="k">worst piece</div></div>
+<div class="stat"><div class="n">{hindsight['recalls']}</div>
+  <div class="k">deliberate returns to an early phrase</div></div>
+</div>
+
+<p>Two things had to exist for that number to be non-trivial, and they are worth separating
+because only one of them is the clever part.</p>
+
+<div class="read"><b>The ability mattered more than the wanting.</b> The audition had no candidate
+that reached back for a *specific* earlier phrase — only the germ, and descendants of whatever was
+just played. Adding one — pick the early phrase that is still expensive to describe, offer it back
+as it was, inverted or in retrograde — roughly doubled the measurement on its own. Caring about it
+on top of that adds about a tenth as much again ({hindsight['indifferent'] * 100:.1f}% with the
+criterion switched off against {hindsight['share'] * 100:.1f}% with it on), and the effect
+saturates: weighting it three times as heavily buys nothing further.</div>
+
+<p class="sub">One piece, in full: {hindsight['example'].mood.nearest_theme()},
+seed {hindsight['example'].seed}. {hindsight['example'].reveal.describe()}</p>
+
+
 <div class="q"><b>Not built: intention as a trajectory.</b> The ledger gives the piece something to
 carry. It does not yet give it a plan for what to do with it — target curves for its own unrest,
 promise pressure and decision margin, with the weights it judges by moving to chase them, and the
 intent swapping itself out when it becomes too easy to satisfy.</div>
-
-<div class="q"><b>Not built: retroactive compression.</b> The most interesting form of resolution
-is not lowering tension but making earlier strangeness intelligible — five anomalies revealed as
-one pattern rotated five ways. This engine is unusually well placed to measure that, because the
-notation it writes is a real encoding that regenerates the audio: describe the first movement in
-the vocabulary available then, describe it again in the vocabulary the piece ends with, compare.
-Nothing does that yet.</div>
 
 <div class="q"><b>Not built: the ghosts, still.</b> The obvious job for them is now visible — play
 the losing candidate that <i>would</i> have settled a live promise, quietly, under the winner.
@@ -1126,6 +1201,7 @@ def build() -> str:
     series = evolution_survey()
     choices = choice_survey()
     purpose = purpose_survey()
+    hindsight = hindsight_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -1186,6 +1262,9 @@ is free to end up somewhere the starting weights never allowed.</div>
 account — a leap owes a step back, a progression that walks far from home owes a return — and the
 composer decides which of those to settle now, which to let ripen, and which to keep owing because
 carrying it has become part of what the piece is.</div>
+<div class="read"><b>And it can make its own beginning intelligible.</b> The opening is priced in
+symbols twice — as it could have been written at the time, and knowing how the piece ends — so
+"the ending explained the beginning" is a measured number rather than a claim.</div>
 <div class="read warn"><b>It is not finished, in a specific way.</b> The thing the project is
 named for — making the machine's own uncertainty audible — is designed but not built. What exists
 today is a composer that works; what it is aiming at is something stranger.</div>
@@ -1208,7 +1287,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <div class="panel" id="palette">{panel_palette(data)}</div>
 <div class="panel" id="evolve">{panel_evolve(series, example)}</div>
 <div class="panel" id="choose">{panel_choose(choices)}</div>
-<div class="panel" id="purpose">{panel_purpose(purpose)}</div>
+<div class="panel" id="purpose">{panel_purpose(purpose, hindsight)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

@@ -29,6 +29,7 @@ from compex.generate.palette import (
 from compex.generate.pattern import Bed, Grid, Pattern, PatternChoice
 from compex.generate.promise import Ledger
 from compex.generate.theory import Chord
+from compex.measure import Shape
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,10 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                    motif: theory.Motif, voices: list[VoiceSpec], kit: tuple[VoiceSpec, ...],
                    patterns: dict[str, Pattern], drives: Drives, taste: Taste,
                    lineage: Phrase | None, heard: frozenset[tuple[int, int]],
-                   approach: int | None = None, ledger: Ledger = Ledger()) -> Written:
+                   approach: int | None = None, ledger: Ledger = Ledger(),
+                   position: float = 0.0, past: tuple[Shape, ...] = (),
+                   vocabulary: tuple[Shape, ...] = (),
+                   past_cost: tuple[float, ...] = ()) -> Written:
     """Write one movement under the current drives, taste and patterns."""
     notes: list[Note] = []
     strokes: list[Stroke] = []
@@ -112,7 +116,7 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                 written, lineage, heard, approach, ledger, choice = _lead(
                     seed, index, chord_index, voice, chord, scale, root_pitch,
                     cursor, span, movement, motif, drives, taste, lineage, heard,
-                    approach, ledger)
+                    approach, ledger, position, past, vocabulary, past_cost)
                 notes.extend(written)
                 if choice is not None:
                     choices.append(choice)
@@ -147,7 +151,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
 # ── the lead: audition, then play the winner ──────────────────────────────
 
 def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span,
-          movement, motif, drives, taste, lineage, heard, approach, ledger):
+          movement, motif, drives, taste, lineage, heard, approach, ledger,
+          position=0.0, past=(), vocabulary=(), past_cost=()):
     """Choose a phrase for this chord and write it out.
 
     The choosing happens in scale degrees, which is why it can be judged before
@@ -173,6 +178,10 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
         approach=approach,
         ledger=ledger,
         now_beat=start,
+        position=position,
+        past=past,
+        vocabulary=vocabulary,
+        past_cost=past_cost,
     )
     choice = melody.choose(seed, index, chord_index, setting, taste, lineage, motif,
                            at_beat=start)

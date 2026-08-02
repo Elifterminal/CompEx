@@ -251,3 +251,12 @@ pre { margin: 8px 0 0; font-size: 11.5px; color: var(--dim); white-space: pre-wr
 .obar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 .owed.paid { grid-template-columns: 96px 1fr; opacity: 0.65; }
 .owed.paid code { color: var(--accent-2); }
+
+/* hindsight */
+.hindsight { display: grid; gap: 5px; margin-bottom: 4px; }
+.reveal { display: grid; grid-template-columns: 96px 1fr 96px; gap: 10px; align-items: center; }
+.rname { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+.rbar { height: 9px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.rbar i { display: block; height: 100%; border-radius: 999px; background: var(--dim); }
+.reveal.saved .rbar i { background: var(--accent-2); }
+.rval { font-family: var(--mono); font-size: 11px; color: var(--dim); }

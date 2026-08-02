@@ -64,6 +64,7 @@ class Analysis:
     dissonance: float          # mean interval roughness against the tonic, 0..1
     density: float             # events per beat, normalised against a busy reference
     motif_presence: float      # how much of the germ's contour is still audible
+    revelation: float = 0.5    # share of its own opening the piece has since explained
 
     def is_empty(self) -> bool:
         return self.note_count < MIN_NOTES
@@ -145,13 +146,28 @@ PRINCIPLES: tuple[Principle, ...] = (
         "The germ should stay audible through its transformations. Losing it "
         "entirely means the piece stopped being about anything.",
     ),
+    Principle(
+        "revelation", "minimum description length", 0.04, 1.0, "motif_recall",
+        "A piece that ends should have made its own beginning cheaper to "
+        "describe than it was at the time — five strange events turning out to "
+        "be one thing rotated five ways. Measured in symbols against the "
+        "notation the engine writes, which is why it is a number here rather "
+        "than a figure of speech. Neutral until a piece is long enough to have "
+        "a past worth explaining.",
+    ),
 )
 
 
 def analyse(notes: Sequence[Note], strokes: Sequence[Stroke], motif: Motif,
             scale: tuple[int, ...], root_pitch: int, upto_beat: float,
-            lead_voices: frozenset[str]) -> Analysis:
-    """Measure everything written before ``upto_beat``."""
+            lead_voices: frozenset[str], revelation: float = 0.5) -> Analysis:
+    """Measure everything written before ``upto_beat``.
+
+    ``revelation`` is handed in rather than computed here: it is a property of
+    the *descriptions* the piece could write, not of the notes, and the module
+    that prices descriptions has no business being imported by the one that
+    counts intervals.
+    """
     played = [n for n in notes if n.start < upto_beat]
     if len(played) < MIN_NOTES:
         return _neutral(len(played), 0)
@@ -163,7 +179,8 @@ def analyse(notes: Sequence[Note], strokes: Sequence[Stroke], motif: Motif,
         # noise — better to stay quiet than to invent a reading.
         return _neutral(len(played), len(lead),
                         density=_density(played, strokes, upto_beat),
-                        dissonance=_dissonance(played, scale, root_pitch))
+                        dissonance=_dissonance(played, scale, root_pitch),
+                        revelation=revelation)
 
     pitches = [n.pitch for n in lead]
 
@@ -186,16 +203,17 @@ def analyse(notes: Sequence[Note], strokes: Sequence[Stroke], motif: Motif,
         dissonance=_dissonance(played, scale, root_pitch),
         density=_density(played, strokes, upto_beat),
         motif_presence=_motif_presence(pitches, motif),
+        revelation=revelation,
     )
 
 
 def _neutral(note_count: int, lead_count: int, density: float = 0.3,
-             dissonance: float = 0.3) -> Analysis:
+             dissonance: float = 0.3, revelation: float = 0.5) -> Analysis:
     """An analysis that sits inside every band, so it applies no pressure at all."""
     return Analysis(note_count=note_count, lead_count=lead_count, novelty=0.45,
                     repetition=0.45, post_skip_reversal=0.7, tessitura_drift=0.0,
                     register_spread=12.0, dissonance=dissonance, density=density,
-                    motif_presence=0.6)
+                    motif_presence=0.6, revelation=revelation)
 
 
 def _melodic_line(played: Sequence[Note], lead_voices: frozenset[str]) -> list[Note]:

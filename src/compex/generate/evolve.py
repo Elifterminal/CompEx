@@ -40,6 +40,7 @@ POLARITY: dict[str, int] = {
     "dissonance": +1,
     "density": +1,
     "motif_presence": +1,
+    "revelation": +1,       # explaining too little of itself wants more recall
 }
 
 #: How far one unit of error moves each drive before plasticity scales it.

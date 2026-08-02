@@ -127,6 +127,7 @@ class CompexHandler(BaseHTTPRequestHandler):
             "patterns": report.patterns(result.composition),
             "taste": report.taste(result.composition),
             "ledger": report.ledger(result.composition),
+            "hindsight": report.hindsight(result.composition),
         }
 
     def _email(self, payload: dict) -> dict:

@@ -31,6 +31,7 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         *_voices(composition),
         *_melody(composition),
         *_ledger(composition),
+        *_hindsight(composition),
         *_evolution(composition),
     ]
     return "\n\n".join(block for block in blocks if block)
@@ -215,6 +216,26 @@ def _ledger(composition: Composition) -> list[str]:
             f"{now - deepest.opened_at:g}\\mathrm{{\\ beats}}"
         )
     return lines
+
+
+def _hindsight(composition: Composition) -> list[str]:
+    """What the ending gave back to the beginning, in symbols.
+
+    This is the one line in the formula that is about the formula: it prices
+    the opening in this notation twice, once as it could have been written at
+    the time and once knowing how the piece ends.
+    """
+    reveal = composition.reveal
+    if reveal is None or not reveal.phrases:
+        return []
+    return [
+        "\\mathrm{HINDSIGHT}:\\ "
+        f"L_{{\\mathrm{{then}}}}={reveal.then:.0f},\\ "
+        f"L_{{\\mathrm{{now}}}}={reveal.now:.0f},\\ "
+        f"L_{{\\mathrm{{literal}}}}={reveal.literal:.0f}\\quad"
+        f"\\Delta={reveal.saved:.0f}\\ ({reveal.share * 100:.0f}\\%"
+        "\\mathrm{\\ of\\ the\\ opening\\ explained\\ by\\ the\\ ending})"
+    ]
 
 
 def _evolution(composition: Composition) -> list[str]:

@@ -297,6 +297,18 @@ function drawChoices(info) {
     </div>`;
   }).join("");
 
+  const reveal = info.hindsight;
+  if (reveal) {
+    $("hindsight").innerHTML = `<h3 class="mini">what the ending explained</h3>
+      <div class="reveal"><span class="rname">as written</span>
+        <span class="rbar"><i style="width:100%"></i></span>
+        <span class="rval">${reveal.then}</span></div>
+      <div class="reveal saved"><span class="rname">in hindsight</span>
+        <span class="rbar"><i style="width:${(reveal.now / reveal.then) * 100}%"></i></span>
+        <span class="rval">${reveal.now}</span></div>
+      <div class="hint">${reveal.note}</div>`;
+  }
+
   const ledger = info.ledger;
   if (ledger) {
     const carrying = ledger.carrying

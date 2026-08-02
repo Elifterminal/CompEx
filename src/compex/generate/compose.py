@@ -51,6 +51,8 @@ from compex.generate.palette import (
 from compex.generate.pattern import Grid, Groove, Pattern, PatternChoice
 from compex.generate.promise import Ledger
 from compex.generate.theory import Chord, Motif
+from compex import measure
+from compex.measure import Reveal, Shape
 
 MIN_BPM, MAX_BPM = 52.0, 168.0
 MIN_MOVEMENTS, MAX_MOVEMENTS = 2, 8
@@ -62,6 +64,12 @@ ARCHETYPES: tuple[str, ...] = ("arch", "ramp", "terraced", "return", "through", 
 #: entry in the kit's colour map — but it needs the same two numbers, and a
 #: low, fairly gentle voice is what a bass is.
 BASS_CHARACTER = (0.18, 0.35)
+
+#: How much of its own past the composer weighs up when deciding whether a
+#: candidate would explain it. All of it would be quadratic in a long piece and
+#: the opening is the part worth explaining anyway.
+PAST_WINDOW = 24
+VOCABULARY_WINDOW = 32
 
 
 @dataclass(frozen=True)
@@ -106,6 +114,7 @@ class Composition:
     opening_taste: Taste = Taste()
     groove: Groove = Groove()
     ledger: Ledger = Ledger()
+    reveal: Reveal | None = None
 
     @property
     def seconds_per_beat(self) -> float:
@@ -133,6 +142,10 @@ class Composition:
 
     def ledger_trace(self) -> str:
         return promise.trace(self.ledger, self.total_beats)
+
+    def shapes(self) -> tuple[Shape, ...]:
+        """Every phrase the piece chose, as material a description could refer to."""
+        return tuple(_shape_of(choice) for choice in self.melodies)
 
     def final_patterns(self) -> tuple[Pattern, ...]:
         """The last pattern each voice settled on."""
@@ -164,6 +177,7 @@ class Composition:
             f"taste moved on: {', '.join(strayed) if strayed else 'nothing'}"
             f" · {moved} rhythm grid(s) past their starting weights",
             f"promises: {self.ledger.summary(self.total_beats)}",
+            f"hindsight: {self.reveal.describe() if self.reveal else 'not measured'}",
             f"evolved: {corrections} corrections over {len(self.evolution)} listen-backs, "
             f"plasticity {self.final_drives.plasticity:.2f}",
         ])
@@ -214,14 +228,20 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     heard: frozenset[tuple[int, int]] = frozenset()
     approach: int | None = None
     ledger = Ledger()
+    shapes: list[Shape] = [Shape(label="germ", steps=motif.steps, rhythm=motif.rhythm)]
+    revelation = 0.5
     figures: dict[str, Pattern] = {}
     cursor = 0.0
 
     for index, movement in enumerate(movements):
         # ── listen back before writing anything new ──────────────────────
         if index > 0:
+            # Only ask what the piece has explained about itself once there is
+            # enough of it to have been strange in the first place.
+            revelation = _revelation(shapes, movements, index, cursor) \
+                if index > 1 else 0.5
             analysis = critic.analyse(notes, strokes, motif, scale, root_pitch,
-                                      cursor, lead_voices)
+                                      cursor, lead_voices, revelation=revelation)
             verdicts = critic.judge(analysis, mood)
             before = drives
             drives, adjustments = respond(drives, verdicts, analysis)
@@ -250,14 +270,19 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
             float(beats_per_bar), figures, ledger, cursor)
         patterns.extend(chosen)
 
+        total = sum(m.beats for m in movements)
+        past = tuple(shapes[1:PAST_WINDOW + 1])
         written = write.write_movement(
             seed, index, movement, cursor, scale, root_pitch, working, chord_beats,
             current_motif, voices, kit, figures, drives, taste, lineage, heard, approach,
-            ledger,
+            ledger, cursor / max(total, 1e-6),
+            past, tuple(shapes[-VOCABULARY_WINDOW:]),
+            measure.baseline(past, tuple(shapes[:1])),
         )
         notes.extend(written.notes)
         strokes.extend(written.strokes)
         melodies.extend(written.choices)
+        shapes.extend(_shape_of(choice) for choice in written.choices)
         lineage, heard, approach = written.lineage, written.heard, written.approach
         ledger = written.ledger
 
@@ -282,6 +307,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         grids=tuple(grids.values()), retunings=tuple(retunings),
         taste=taste, opening_taste=opening_taste, groove=groove,
         ledger=ledger.forget(cursor),
+        reveal=_reveal_of(tuple(shapes), movements),
     )
 
 
@@ -313,6 +339,42 @@ def _reharmonise(base: tuple[Chord, ...], seed: int, index: int, drives: Drives,
             degree = (degree + move) % len(scale)
         out.append(Chord(degree=degree, size=size))
     return tuple(out)
+
+
+def _shape_of(choice: Choice) -> Shape:
+    """A chosen phrase as something a later description could point at."""
+    return Shape(label=f"m{choice.movement}@{choice.at_beat:g}",
+                 steps=choice.chosen.steps, rhythm=choice.chosen.rhythm,
+                 at_beat=choice.at_beat)
+
+
+def _reveal_of(shapes: tuple[Shape, ...], movements: tuple[Movement, ...]) -> Reveal:
+    """Describe the opening as it was written, then as the finished piece can.
+
+    The germ is in both vocabularies — it existed before a note did. Everything
+    else the piece learned to say about itself is only in the second one, and
+    the difference between the two descriptions is what the ending gave back to
+    the beginning.
+
+    "The opening" is the first half rather than the first movement. A first
+    movement can be two phrases long, and a measurement taken on two phrases is
+    a coin toss dressed as a number.
+    """
+    if not movements:
+        return measure.reveal((), (), ())
+    half = sum(movement.beats for movement in movements) * 0.5
+    germ = shapes[:1]
+    written = shapes[1:]
+    opening = tuple(shape for shape in written if shape.at_beat < half)[:PAST_WINDOW]
+    later = tuple(shape for shape in written if shape.at_beat >= half)
+    return measure.reveal(opening, germ, later)
+
+
+def _revelation(shapes: list[Shape], movements: tuple[Movement, ...], index: int,
+                cursor: float) -> float:
+    """How much of its own opening the piece has explained by now, 0..1."""
+    so_far = _reveal_of(tuple(shapes), movements[:index] or movements)
+    return min(1.0, so_far.share)
 
 
 def _harmony_promises(ledger: Ledger, working: tuple[Chord, ...], scale: tuple[int, ...],

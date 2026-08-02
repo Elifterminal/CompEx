@@ -164,6 +164,17 @@ pre {
         border: 1px solid var(--line); }
 .obar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 
+/* hindsight */
+.hindsight { display: grid; gap: 5px; margin-bottom: 10px; }
+.reveal { display: grid; grid-template-columns: 88px 1fr 44px; gap: 8px; align-items: center;
+          font-size: 12px; }
+.rname { font-family: var(--mono); color: var(--dim); }
+.rbar { height: 8px; border-radius: 999px; background: var(--panel-2);
+        border: 1px solid var(--line); }
+.rbar i { display: block; height: 100%; border-radius: 999px; background: var(--dim); }
+.reveal.saved .rbar i { background: var(--accent-2); }
+.rval { font-family: var(--mono); font-size: 11px; color: var(--dim); text-align: right; }
+
 /* dock
 .dock {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
