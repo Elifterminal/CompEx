@@ -29,6 +29,7 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         _form(composition),
         *_combs(composition),
         *_voices(composition),
+        *_evolution(composition),
     ]
     return "\n\n".join(block for block in blocks if block)
 
@@ -116,6 +117,51 @@ def _voices(composition: Composition) -> list[str]:
             detail = ",\\ ".join(f"\\mathrm{{{key}}}={value:g}" for key, value in settings)
             line += f"\\circ\\mathrm{{{name}}}\\left({detail}\\right)"
         lines.append(f"{line}\\cdot{voice.gain:.2f}")
+    return lines
+
+
+def _evolution(composition: Composition) -> list[str]:
+    """Write out where the piece changed its mind, and what made it.
+
+    This is the part that cannot be reconstructed by reading the other lines —
+    it is the record of the composer listening to itself.
+    """
+    if not composition.evolution:
+        return []
+
+    lines = [
+        "\\mathrm{EVOLUTION}:\\ " +
+        f"{len(composition.evolution)}\\mathrm{{\\ listen\\text{{-}}backs}},\\ " +
+        f"{sum(len(s.adjustments) for s in composition.evolution)}\\mathrm{{\\ corrections}}"
+    ]
+    for step in composition.evolution:
+        heard = ",\\ ".join(
+            f"\\mathrm{{{v.principle.name}}}={v.measured:.2f}" for v in step.unhappy
+        ) or "\\mathrm{all\\ satisfied}"
+        did = ",\\ ".join(
+            f"\\mathrm{{{a.drive}}}\\,{a.before:.2f}\\!\\rightarrow\\!{a.after:.2f}"
+            for a in step.adjustments
+        ) or "\\mathrm{held}"
+        lines.append(
+            f"E_{{{step.movement}}}(\\mathrm{{{step.movement_name}}}@{step.at_beat:g})="
+            f"\\left\\{{\\mathrm{{heard}}:\\ {heard};\\ \\mathrm{{did}}:\\ {did}\\right\\}}"
+        )
+
+    final = composition.final_drives
+    lines.append(
+        "\\Theta_{\\mathrm{final}}=\\left("
+        + ",\\ ".join([
+            f"\\mathrm{{novelty}}={final.novelty_pressure:.2f}",
+            f"\\mathrm{{gap}}={final.gap_fill:.2f}",
+            f"\\mathrm{{pull}}={final.register_pull:.2f}",
+            f"\\mathrm{{reach}}={final.register_reach:.2f}",
+            f"\\mathrm{{diss}}={final.dissonance_ceiling:.2f}",
+            f"\\mathrm{{dens}}={final.density_bias:.2f}",
+            f"\\mathrm{{recall}}={final.motif_recall:.2f}",
+            f"\\mathrm{{plasticity}}={final.plasticity:.2f}",
+        ])
+        + "\\right)"
+    )
     return lines
 
 

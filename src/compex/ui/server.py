@@ -123,6 +123,7 @@ class CompexHandler(BaseHTTPRequestHandler):
             "theme": mood.nearest_theme(),
             "peaks": _waveform(result.samples),
             "movements": _movements(result.composition),
+            "evolution": _evolution(result.composition),
         }
 
     def _email(self, payload: dict) -> dict:
@@ -228,6 +229,27 @@ def _movements(composition: Composition) -> list[dict]:
         })
         cursor += movement.beats
     return out
+
+
+def _evolution(composition: Composition) -> list[dict]:
+    """Where the composer listened back and changed its mind."""
+    return [{
+        "movement": step.movement,
+        "name": step.movement_name,
+        "at": round(step.at_beat, 2),
+        "heard": [{"principle": v.principle.name,
+                   "measured": round(v.measured, 3),
+                   "attribution": v.principle.attribution}
+                  for v in step.unhappy],
+        "did": [{"drive": a.drive,
+                 "before": round(a.before, 3),
+                 "after": round(a.after, 3),
+                 "because": a.principle}
+                for a in step.adjustments],
+        "note": step.note(),
+        "plasticity": round(step.after.plasticity, 3),
+        "unrest": round(step.after.unrest, 3),
+    } for step in composition.evolution]
 
 
 def _bind(preferred: int) -> ThreadingHTTPServer:

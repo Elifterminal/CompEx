@@ -217,13 +217,18 @@ def _ideal_duration(energy: float) -> float:
 
 
 def develop(motif: Motif, seed: int, index: int, tension: float,
-            stream: str = "develop") -> Motif:
+            stream: str = "develop",
+            fatigue: tuple[tuple[str, float], ...] = ()) -> tuple[Motif, str]:
     """Return a variation of ``motif`` — Schoenberg's developing variation, mechanised.
 
     Each movement transforms what came before rather than starting fresh, so
     the piece grows out of one idea instead of collecting unrelated ones.
+
+    ``fatigue`` down-weights transforms used recently. Without it the same
+    seed reaches for the same operation every time and the piece develops in
+    one direction until it falls off the edge.
     """
-    kind = rng.pick(seed, f"{stream}-kind", index, TRANSFORMS)
+    kind = _pick_transform(seed, f"{stream}-kind", index, fatigue)
     steps, rhythm = list(motif.steps), list(motif.rhythm)
 
     if kind == "transpose":
@@ -252,4 +257,19 @@ def develop(motif: Motif, seed: int, index: int, tension: float,
     if tension > 0.7 and rng.uniform(seed, f"{stream}-bite", index) > 0.6:
         steps = [step + (1 if step % 2 else -1) for step in steps]
 
-    return Motif(steps=tuple(steps), rhythm=tuple(rhythm))
+    return Motif(steps=tuple(steps), rhythm=tuple(rhythm)), kind
+
+
+def _pick_transform(seed: int, stream: str, index: int,
+                    fatigue: tuple[tuple[str, float], ...]) -> str:
+    """Weighted draw over the transforms, avoiding whatever was just used."""
+    tired = dict(fatigue)
+    weights = [(kind, 1.0 / (1.0 + tired.get(kind, 0.0) * 2.2)) for kind in TRANSFORMS]
+    total = sum(weight for _, weight in weights)
+    target = rng.uniform(seed, stream, index) * total
+    running = 0.0
+    for kind, weight in weights:
+        running += weight
+        if target <= running:
+            return kind
+    return TRANSFORMS[-1]

@@ -7,6 +7,7 @@ as notation so you can read what the machine decided.
 """
 
 from compex.generate.compose import Composition, compose
+from compex.generate.evolve import Drives, Evolution
 from compex.generate.mood import THEMES, Mood
 
-__all__ = ["Composition", "Mood", "THEMES", "compose"]
+__all__ = ["Composition", "Drives", "Evolution", "Mood", "THEMES", "compose"]

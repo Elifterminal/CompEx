@@ -33,6 +33,7 @@ from compex.dsp.effects import EFFECT_NAMES                       # noqa: E402
 from compex.dsp.engines import ENGINE_NAMES                       # noqa: E402
 from compex.dsp.engines import core, struck, sustained, textural, voiced  # noqa: E402
 from compex.generate import THEMES, compose                       # noqa: E402
+from compex.generate.critic import PRINCIPLES                     # noqa: E402
 from compex.generate.mood import AXES                             # noqa: E402
 from compex.generate.palette import (                             # noqa: E402
     DRUM_COLOUR,
@@ -86,6 +87,25 @@ def survey() -> dict:
 def worked_example(seed: int = 7788, theme: str = "menacing", seconds: float = 45.0):
     """One real track, rendered, so the page can show the whole chain of decisions."""
     return make_track(Knobs(seed=seed, duration_s=seconds), THEMES[theme])
+
+
+EVOLUTION_THEMES = ("serene", "hypnotic", "melancholy", "menacing", "frantic")
+EVOLUTION_SECONDS = 180.0
+
+
+def evolution_survey() -> dict:
+    """Long pieces, so there are enough listen-backs to see a trajectory."""
+    out: dict[str, dict] = {}
+    for name in EVOLUTION_THEMES:
+        piece = compose(7788, EVOLUTION_SECONDS, THEMES[name])
+        out[name] = {
+            "piece": piece,
+            "plasticity": [s.after.plasticity for s in piece.evolution],
+            "unrest": [s.after.unrest for s in piece.evolution],
+            "unhappy": [len(s.unhappy) for s in piece.evolution],
+            "corrections": sum(len(s.adjustments) for s in piece.evolution),
+        }
+    return out
 
 
 # ── svg helpers ────────────────────────────────────────────────────────────
@@ -259,6 +279,50 @@ def fig_engine_map() -> str:
                f"All {len(ENGINE_NAMES)} engines placed by character. The composer ranks them against "
                "the mood's own (valence, grit, energy) and draws from the nearest four — so a theme "
                "instruments itself differently each seed without ever reaching somewhere wrong.")
+
+
+def fig_plasticity(series) -> str:
+    w, h = 900, 400
+    longest = max(len(series[t]["plasticity"]) for t in EVOLUTION_THEMES)
+    body, tx, ty = frame(w, h, 26, "listen-back", "plasticity  (how hard it reacts)",
+                         ((0, longest - 1), list(range(longest))), ((0, 1.0), [0, 0.25, 0.5, 0.75, 1.0]))
+    parts = [body]
+    colours = ["var(--ok)", "var(--accent-2)", "var(--mut)", "var(--accent)", "var(--warn)"]
+    for index, theme in enumerate(EVOLUTION_THEMES):
+        values = series[theme]["plasticity"]
+        colour = colours[index % len(colours)]
+        points = " ".join(f"{tx(i):.1f},{ty(v):.1f}" for i, v in enumerate(values))
+        parts.append(f'<polyline points="{points}" fill="none" stroke="{colour}" stroke-width="2.2"/>')
+        for i, value in enumerate(values):
+            parts.append(circle(tx(i), ty(value), 2.6, colour))
+        parts.append(text(tx(len(values) - 1) + 6, ty(values[-1]) + 4, theme, 11, colour))
+    return fig(svg(w, h, "".join(parts)),
+               "Plasticity is the second-order part — not what the composer decides, but how "
+               "hard it reacts to its own critic. It falls when the principles are satisfied "
+               "and climbs when complaints persist. Serene and hypnotic settle to the floor and "
+               "stop fidgeting; frantic never gets comfortable and keeps pushing.")
+
+
+def fig_drives(piece) -> str:
+    tracked = ("novelty_pressure", "gap_fill", "register_reach",
+               "dissonance_ceiling", "motif_recall")
+    w, h = 900, 420
+    steps = len(piece.evolution)
+    if steps < 2:
+        return ""
+    body, tx, ty = frame(w, h, 26, "listen-back", "drive value",
+                         ((0, steps - 1), list(range(steps))), ((0, 1.0), [0, 0.25, 0.5, 0.75, 1.0]))
+    parts = [body]
+    colours = ["var(--accent)", "var(--ok)", "var(--accent-2)", "var(--warn)", "var(--mut)"]
+    for index, drive in enumerate(tracked):
+        values = [getattr(s.after, drive) for s in piece.evolution]
+        colour = colours[index % len(colours)]
+        points = " ".join(f"{tx(i):.1f},{ty(v):.1f}" for i, v in enumerate(values))
+        parts.append(f'<polyline points="{points}" fill="none" stroke="{colour}" stroke-width="2"/>')
+        parts.append(text(tx(steps - 1) + 6, ty(values[-1]) + 4, drive.replace("_", " "), 10.5, colour))
+    return fig(svg(w, h, "".join(parts)),
+               "The parameters the composer writes with, moving across one piece as it listens "
+               "to itself. Each move is caused by a named principle failing, not by the seed.")
 
 
 def fig_waveforms(examples) -> str:
@@ -574,6 +638,83 @@ code says either. Both fall out of the axes.</div>
 """
 
 
+def panel_evolve(series, example) -> str:
+    piece = series["menacing"]["piece"]
+    principles = "".join(
+        f"<tr><td><b>{p.name.replace('_', ' ')}</b></td>"
+        f"<td class='sub'>{p.attribution}</td>"
+        f"<td><code>{p.drive}</code></td>"
+        f"<td class='sub'>{p.why}</td></tr>"
+        for p in PRINCIPLES)
+
+    trace = "".join(
+        f"<div class='read'><b>{step.movement_name} — beat {step.at_beat:g}</b><br>"
+        f"<span class='sub'>heard: "
+        + (", ".join(f"{v.principle.name} {v.measured:.2f}" for v in step.unhappy)
+           or "nothing to correct")
+        + f"</span><br>{step.note()}</div>"
+        for step in piece.evolution[:6])
+
+    return f"""
+<h2 style="margin-top:26px">How it changes its mind</h2>
+<p class="sub">The piece is not decided in advance. After each movement the composer listens
+back to what it actually wrote and adjusts.</p>
+
+<p>Everything up to here describes decisions made <i>before</i> a note exists. That is only half
+of it. The composer also runs a loop: write a movement, measure what came out, compare it
+against a set of aesthetic principles, and shift the parameters it writes with before starting
+the next one.</p>
+
+<div class="read"><b>So the second half of a piece is a consequence of the first half</b>, not
+just of the seed. The harmony is re-voiced under the new parameters, the motif is either
+developed further or recalled, and the note-writing itself reads the drives rather than fixed
+constants.</div>
+
+<h3>The principles it listens against</h3>
+<p>These are not preferences invented for this project. They are regularities that music
+perception research keeps finding, each carrying the name it is known by so the judgement can be
+argued with rather than just accepted.</p>
+<table><thead><tr><th>measures</th><th>after</th><th>moves</th><th>why it exists</th></tr></thead>
+<tbody>{principles}</tbody></table>
+
+<div class="read"><b>Each principle wants a band, not a maximum.</b> That matters most for
+novelty: Berlyne's inverted-U says liking peaks in the middle, so a composer told simply to
+maximise novelty would walk straight off the end into noise. And the bands move with the
+mood — a menacing piece is allowed a dissonance a serene one would fail on.</div>
+
+<h3>The second-order part</h3>
+<p>The drives move in response to the critic. <b>How hard they move</b> also changes.</p>
+{fig_plasticity(series)}
+<div class="read"><b>This is what makes it a second-order system rather than a thermostat.</b>
+The state evolves, and the rule that updates the state evolves under it. When the same
+complaints keep coming back, the composer concludes its corrections were too timid and reacts
+harder. When the principles are satisfied it relaxes and stops interfering with something that
+is working.</div>
+
+{fig_drives(piece)}
+
+<h3>What it actually did, in one piece</h3>
+<p class="sub">Seed {piece.seed}, {piece.mood.nearest_theme()},
+{EVOLUTION_SECONDS:.0f} seconds — {len(piece.evolution)} listen-backs,
+{series['menacing']['corrections']} corrections.</p>
+{trace}
+
+<h3>Memory is lossy, on purpose</h3>
+<p>The composer does not keep the germ motif. It keeps a <b>sketch</b> — which direction each
+step moved, roughly how long each note was, how far the widest leap reached. Everything else is
+discarded.</p>
+<div class="read"><b>So when the theme returns it cannot be retrieved, only reconstructed</b>,
+and the gaps get filled using whatever the drives have become by then. A theme coming back at
+minute four is the theme as remembered by something that has changed since it first played it.
+Literal recapitulation is a copy; this is a memory.</div>
+
+<div class="q"><b>Open: the bands are calibrated by argument, not by ear.</b> The principles are
+real and the attributions are honest, but where exactly each band sits — is 0.28 to 0.62 the
+right window for novelty? — is my judgement. A band set wrong produces a composer that
+confidently corrects toward the wrong thing, and it would look identical in the logs.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -641,6 +782,7 @@ questions. But thats fine because it is meant to be experimental."</i></div>
 def build() -> str:
     data = survey()
     example = worked_example()
+    series = evolution_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -676,6 +818,9 @@ instruments exist and how each is built — is invented by the machine.</div>
 <div class="read ok"><b>It writes down what it did.</b> Each track is saved with the equation
 notation describing every decision, and feeding that notation back produces the identical track,
 byte for byte.</div>
+<div class="read"><b>And it changes its mind while writing.</b> After each movement it
+listens back to what it actually wrote, scores it against named aesthetic principles, and shifts
+the parameters it writes with — including how hard it reacts to itself.</div>
 <div class="read warn"><b>It is not finished, in a specific way.</b> The thing the project is
 named for — making the machine's own uncertainty audible — is designed but not built. What exists
 today is a composer that works; what it is aiming at is something stranger.</div>
@@ -685,6 +830,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <button class="tab active" data-panel="how">What it is</button>
 <button class="tab" data-panel="mood">The mood axes</button>
 <button class="tab" data-panel="palette">The palette</button>
+<button class="tab" data-panel="evolve">How it changes its mind</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
@@ -693,6 +839,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 {fig_waveforms(waves)}</div>
 <div class="panel" id="mood">{panel_mood(data)}</div>
 <div class="panel" id="palette">{panel_palette(data)}</div>
+<div class="panel" id="evolve">{panel_evolve(series, example)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

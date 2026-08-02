@@ -117,6 +117,40 @@ src/compex/
 move the composer is offered is already idiomatic, so it never has to generate
 garbage and filter it.
 
+## It changes its mind while writing
+
+The piece is not decided up front. After each movement the composer listens
+back to what it actually wrote, measures it, and shifts the parameters it
+writes with before starting the next one — so the second half of a track is a
+consequence of the first half, not just of the seed.
+
+It listens against attributed principles rather than invented preferences:
+
+| principle | says |
+| --- | --- |
+| Berlyne's inverted-U | liking peaks at *moderate* novelty — so novelty gets a band, not a maximum |
+| Huron's post-skip reversal | after a large leap, melodies step back the other way |
+| von Hippel & Huron | melodies regress toward their central pitch |
+| Meyer's expectation | tension has to move to mean anything |
+| Huron on self-similarity | music repeats far more than speech — there's a repetition *floor* |
+| Schoenberg | the germ stays audible through its transformations |
+
+The bands shift with the mood: a menacing piece is allowed a dissonance a
+serene one would fail on.
+
+**Second order.** How hard it reacts also changes. When the same complaints
+keep returning it concludes its corrections were too timid and pushes harder;
+when things are working it settles and stops interfering. The state evolves,
+and the rule that updates the state evolves under it.
+
+**Memory is lossy on purpose.** It doesn't keep the motif, it keeps a sketch —
+contour direction and rough durations. So a returning theme can't be
+retrieved, only rebuilt, with the gaps filled by whatever the drives have
+become. Literal recapitulation is a copy; this is a memory.
+
+Every `.tex` formula carries the full evolution: each correction with the
+principle that caused it.
+
 ## Determinism
 
 Same three inputs, same samples, always. It is not a nicety — it is what makes
@@ -131,7 +165,7 @@ seeking is free and nothing desyncs.
 python3 -m unittest discover -s tests -t .
 ```
 
-84 tests. The ones that matter most: every engine, drum and effect renders
+109 tests. The ones that matter most: every engine, drum and effect renders
 finite audible audio at every register, every theme renders without blowing
 up, every note names a voice that exists, and a track's own formula
 reproduces it exactly.

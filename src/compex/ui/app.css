@@ -185,3 +185,13 @@ pre { margin: 8px 0 0; font-size: 11.5px; color: var(--dim); white-space: pre-wr
 }
 #formula-panel .note { display: block; margin: 10px 0 0; }
 #summary { min-height: 96px; margin-bottom: 10px; color: var(--ink); }
+
+/* the listening loop */
+.evo-step { border-left: 2px solid var(--line); padding: 0 0 10px 12px; margin-bottom: 10px; }
+.evo-step:hover { border-left-color: var(--accent); }
+.evo-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 5px; }
+.evo-heard { margin-bottom: 6px; }
+.chip.ok { color: var(--accent-2); border-color: var(--accent-2); }
+.did { font-size: 12px; font-family: var(--mono); color: var(--dim); margin: 2px 0; }
+.did code { color: var(--accent); background: none; padding: 0; }
+.did .note { font-family: system-ui, sans-serif; margin-left: 6px; }

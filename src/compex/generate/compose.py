@@ -1,10 +1,20 @@
-"""Invent a whole piece from a seed, a runtime and a mood.
+"""Invent a whole piece from a seed, a runtime and a mood — and keep changing it.
 
 Nothing is looked up. Tempo, meter, mode, harmony, the germ motif, the form,
-which instruments exist and how they are voiced are all decided here by
-walking the theory in :mod:`compex.generate.theory` with the seeded RNG.
-Because the RNG is positional rather than sequential, the same three inputs
-always produce the same piece, note for note.
+which instruments exist and how they are voiced are all decided by walking the
+theory in :mod:`compex.generate.theory` with the seeded RNG.
+
+But the piece is not decided all at once. After each movement the composer
+**listens back** to what it actually wrote (:mod:`compex.generate.critic`),
+compares it against a set of named aesthetic principles, and **shifts the
+drives it writes with** (:mod:`compex.generate.evolve`) before starting the
+next one. The harmony is reharmonised under the new drives, the motif is
+either developed further or recalled through a lossy memory, and the note
+writing itself reads the drives rather than fixed constants.
+
+So the second half of a piece is a consequence of the first half, not just of
+the seed. It still comes out identical every time — the analysis is
+deterministic and so is everything it feeds.
 """
 
 from __future__ import annotations
@@ -13,12 +23,16 @@ import math
 from dataclasses import dataclass
 
 from compex import rng
-from compex.generate import theory
+from compex.generate import critic, recall, theory
+from compex.generate.critic import Analysis, Verdict
+from compex.generate.evolve import Drives, Evolution, initial_drives, respond, trace
+from compex.generate.material import Movement, Note, Stroke
 from compex.generate.mood import Mood
 from compex.generate.palette import (
     ROLE_BASS,
     ROLE_LEAD,
     ROLE_PAD,
+    ROLE_PERC,
     ROLE_TEXTURE,
     VoiceSpec,
     build_kit,
@@ -54,34 +68,6 @@ DRUM_PERIODS: dict[str, tuple[float, ...]] = {
 
 
 @dataclass(frozen=True)
-class Movement:
-    """One span of the invented form."""
-
-    name: str
-    beats: float
-    energy: float
-    tension: float
-
-
-@dataclass(frozen=True)
-class Note:
-    start: float       # beats from the top
-    duration: float    # beats
-    pitch: float       # MIDI note number
-    velocity: float
-    voice: str
-
-
-@dataclass(frozen=True)
-class Stroke:
-    """A percussion hit."""
-
-    start: float
-    velocity: float
-    voice: str
-
-
-@dataclass(frozen=True)
 class Composition:
     seed: int
     mood: Mood
@@ -99,6 +85,8 @@ class Composition:
     combs: tuple[Comb, ...]
     notes: tuple[Note, ...]
     strokes: tuple[Stroke, ...]
+    evolution: tuple[Evolution, ...] = ()
+    final_drives: Drives = Drives()
 
     @property
     def seconds_per_beat(self) -> float:
@@ -115,9 +103,13 @@ class Composition:
     def voice(self, voice_id: str) -> VoiceSpec | None:
         return next((v for v in self.voices if v.voice_id == voice_id), None)
 
+    def evolution_trace(self) -> str:
+        return trace(self.evolution)
+
     def summary(self) -> str:
-        pitched = [v for v in self.voices if v.role != "perc"]
-        drums = [v for v in self.voices if v.role == "perc"]
+        pitched = [v for v in self.voices if v.role != ROLE_PERC]
+        drums = [v for v in self.voices if v.role == ROLE_PERC]
+        corrections = sum(len(step.adjustments) for step in self.evolution)
         return "\n".join([
             f"{self.bpm:.1f} BPM in {self.beats_per_bar}/4 · {self.scale_name.replace('_', ' ')}"
             f" on {_pitch_name(self.root_pitch)}",
@@ -127,6 +119,8 @@ class Composition:
             "voices: " + ", ".join(f"{v.role}/{v.engine}" for v in pitched),
             "kit: " + (", ".join(v.voice_id for v in drums) or "none"),
             f"{len(self.notes)} notes, {len(self.strokes)} strokes",
+            f"evolved: {corrections} corrections over {len(self.evolution)} listen-backs, "
+            f"plasticity {self.final_drives.plasticity:.2f}",
         ])
 
 
@@ -149,20 +143,45 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     chord_beats = float(beats_per_bar) * rng.pick(seed, "harmonic-rhythm", 0, (1.0, 1.0, 2.0, 4.0))
 
     motif = theory.make_motif(seed, scale, mood.energy, mood.tension)
+    sketch = recall.compress(motif)
     archetype = _archetype(seed, mood)
 
     movements = _movements(seed, duration_s, bpm, beats_per_bar, mood, archetype)
     voices = _voices(seed, mood)
     kit = build_kit(seed, mood)
     combs = _combs(seed, kit, beats_per_bar, mood)
+    lead_voices = frozenset(v.voice_id for v in voices if v.role == ROLE_LEAD)
 
+    drives = initial_drives(mood, root_pitch)
     notes: list[Note] = []
     strokes: list[Stroke] = []
+    history: list[Evolution] = []
+    current_motif = motif
     cursor = 0.0
+
     for index, movement in enumerate(movements):
+        # ── listen back before writing anything new ──────────────────────
+        if index > 0:
+            analysis = critic.analyse(notes, strokes, motif, scale, root_pitch,
+                                      cursor, lead_voices)
+            verdicts = critic.judge(analysis, mood)
+            before = drives
+            drives, adjustments = respond(drives, verdicts, analysis)
+            history.append(Evolution(
+                movement=index, movement_name=movement.name, at_beat=cursor,
+                analysis=analysis, verdicts=verdicts, adjustments=adjustments,
+                before=before, after=drives,
+            ))
+
+            current_motif, used = _next_motif(current_motif, sketch, seed, index,
+                                              movement.tension, drives)
+            drives = drives.with_use(used)
+
+        working = _reharmonise(progression, seed, index, drives, scale)
+
         written, hit = _write_movement(
-            seed, index, movement, cursor, scale, root_pitch, progression,
-            chord_beats, motif, voices, combs, kit, mood,
+            seed, index, movement, cursor, scale, root_pitch, working,
+            chord_beats, current_motif, voices, combs, kit, drives,
         )
         notes.extend(written)
         strokes.extend(hit)
@@ -177,10 +196,41 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         chord_beats=chord_beats, motif=motif, movements=movements,
         voices=tuple(voices) + kit, combs=combs,
         notes=tuple(notes), strokes=tuple(strokes),
+        evolution=tuple(history), final_drives=drives,
     )
 
 
-# -- the decisions ---------------------------------------------------------
+# ── how the piece changes its mind ────────────────────────────────────────
+
+def _next_motif(current: Motif, sketch: recall.Sketch, seed: int, index: int,
+                tension: float, drives: Drives) -> tuple[Motif, str]:
+    """Either develop what we have, or try to remember the germ and fail usefully."""
+    if rng.uniform(seed, "recall-gate", index) < drives.motif_recall:
+        return recall.remember(sketch, seed, index, drives), "recall"
+    return theory.develop(current, seed, index, tension, fatigue=drives.fatigue)
+
+
+def _reharmonise(base: tuple[Chord, ...], seed: int, index: int, drives: Drives,
+                 scale: tuple[int, ...]) -> tuple[Chord, ...]:
+    """Re-voice the progression under the current drives.
+
+    Chord heights are drawn against the dissonance the composer will currently
+    tolerate, and novelty pressure decides how often a degree gets swapped for
+    a neighbour. The harmonic skeleton survives; its flesh moves.
+    """
+    sizes = theory.chord_sizes(drives.dissonance_ceiling)
+    out: list[Chord] = []
+    for position, chord in enumerate(base):
+        size = rng.pick(seed, f"resize-{index}", position, sizes)
+        degree = chord.degree
+        if rng.uniform(seed, f"subst-{index}", position) < drives.novelty_pressure * 0.32:
+            move = rng.pick(seed, f"substmove-{index}", position, (2, -2, 3, -3, 4))
+            degree = (degree + move) % len(scale)
+        out.append(Chord(degree=degree, size=size))
+    return tuple(out)
+
+
+# ── the up-front decisions ────────────────────────────────────────────────
 
 def _tempo(seed: int, mood: Mood) -> float:
     base = MIN_BPM + mood.energy * (MAX_BPM - MIN_BPM)
@@ -189,11 +239,7 @@ def _tempo(seed: int, mood: Mood) -> float:
 
 
 def _archetype(seed: int, mood: Mood) -> str:
-    """Weight the form archetypes by mood, then draw. Every form stays possible.
-
-    Without this the archetype depends only on the seed, so a serene piece and
-    a frantic one at the same seed would share a shape they should not.
-    """
+    """Weight the form archetypes by mood, then draw. Every form stays possible."""
     weights = {
         "arch": 1.0 + mood.energy,
         "ramp": 0.5 + 1.8 * mood.energy * mood.valence,
@@ -307,13 +353,12 @@ def _combs(seed: int, kit: tuple[VoiceSpec, ...], beats_per_bar: int,
     return tuple(combs)
 
 
-# -- writing the notes -----------------------------------------------------
+# ── writing the notes, under the current drives ───────────────────────────
 
 def _write_movement(seed, index, movement, origin, scale, root_pitch, progression,
-                    chord_beats, motif, voices, combs, kit, mood):
+                    chord_beats, motif, voices, combs, kit, drives):
     notes: list[Note] = []
     strokes: list[Stroke] = []
-    local_motif = motif if index == 0 else theory.develop(motif, seed, index, movement.tension)
 
     end = origin + movement.beats
     chord_index = 0
@@ -324,14 +369,15 @@ def _write_movement(seed, index, movement, origin, scale, root_pitch, progressio
         for voice in voices:
             notes.extend(
                 _voice_notes(seed, index, chord_index, voice, chord, scale, root_pitch,
-                             cursor, span, movement, local_motif, mood)
+                             cursor, span, movement, motif, drives)
             )
         cursor += span
         chord_index += 1
 
+    gate = movement.energy * drives.density_bias
     for drum, comb in zip(kit, combs):
         for beat in comb.hits(origin, end):
-            if rng.uniform(seed, f"gate-{drum.voice_id}", int(beat * 4)) > movement.energy + 0.18:
+            if rng.uniform(seed, f"gate-{drum.voice_id}", int(beat * 4)) > gate + 0.18:
                 continue
             velocity = _clamp(
                 0.45 + 0.55 * movement.energy
@@ -344,7 +390,7 @@ def _write_movement(seed, index, movement, origin, scale, root_pitch, progressio
 
 
 def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pitch,
-                 start, span, movement, motif, mood) -> list[Note]:
+                 start, span, movement, motif, drives) -> list[Note]:
     stream = f"{voice.voice_id}-{movement_index}-{chord_index}"
     base = root_pitch + 12 * voice.octave
     velocity = _clamp(0.35 + 0.65 * movement.energy, 0.08, 1.0)
@@ -362,8 +408,9 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
         hits = [0.0]
         subdivision = 1.0 if movement.energy < 0.5 else 0.5
         position = subdivision
+        appetite = movement.energy * 0.55 * drives.density_bias
         while position < span:
-            if rng.uniform(seed, f"{stream}-b", int(position * 4)) < movement.energy * 0.55:
+            if rng.uniform(seed, f"{stream}-b", int(position * 4)) < appetite:
                 hits.append(position)
             position += subdivision
         return [
@@ -381,15 +428,31 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
                      velocity=velocity * 0.55, voice=voice.voice_id)]
 
     # lead — speak the motif over this chord, then rest
-    if rng.uniform(seed, f"{stream}-rest", 0) > 0.22 + movement.energy * 0.72:
+    rest_gate = 0.22 + movement.energy * 0.72 * drives.density_bias
+    if rng.uniform(seed, f"{stream}-rest", 0) > rest_gate:
         return []
+
+    # Novelty pressure rotates the motif's starting point per chord, so a
+    # restless composer stops saying the same phrase over every chord. Without
+    # this the novelty drive has no way to affect what novelty measures.
+    turn = chord_index if drives.novelty_pressure > 0.5 else 0
+    steps = _rotate(motif.steps, turn)
+    rhythm = _rotate(motif.rhythm, turn)
 
     notes: list[Note] = []
     offset = 0.0
-    for position, (step, length) in enumerate(zip(motif.steps, motif.rhythm)):
+    # register_reach *scales* the line as well as bounding it. Clamping alone
+    # can only ever narrow a melody, so the drive could never answer a
+    # complaint that the range was too small.
+    stretch = 0.55 + drives.register_reach * 1.6
+    reach = 1 + int(drives.register_reach * 6)
+    for position, (step, length) in enumerate(zip(steps, rhythm)):
         if offset >= span:
             break
-        pitch = float(base + theory.degree_semitone(scale, chord.degree + step))
+        widened = int(round(step * stretch))
+        bounded = max(-reach, min(reach, widened))
+        pitch = float(base + theory.degree_semitone(scale, chord.degree + bounded))
+        pitch = _pull_toward_centre(pitch, drives, seed, stream, position)
         notes.append(Note(
             start=start + offset,
             duration=min(length, span - offset),
@@ -400,6 +463,28 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
         ))
         offset += length
     return notes
+
+
+def _rotate(values: tuple, turn: int) -> tuple:
+    if not values or turn % len(values) == 0:
+        return values
+    offset = turn % len(values)
+    return values[offset:] + values[:offset]
+
+
+def _pull_toward_centre(pitch: float, drives: Drives, seed: int, stream: str,
+                        position: int) -> float:
+    """Octave-shift a note back toward the tessitura centre.
+
+    Shifting by octaves rather than nudging by semitones keeps the note inside
+    the scale — the line comes home without going out of key to do it.
+    """
+    distance = pitch - drives.register_centre
+    if abs(distance) <= 7.0:
+        return pitch
+    if rng.uniform(seed, f"{stream}-pull", position) > drives.register_pull:
+        return pitch
+    return pitch - 12.0 * (1 if distance > 0 else -1)
 
 
 def _clamp(value: float, low: float, high: float) -> float:

@@ -145,6 +145,39 @@ function drawMarks(movements, duration) {
   }).join("");
 }
 
+/* ---------- evolution ---------- */
+
+function drawEvolution(steps) {
+  const host = $("evolution");
+  if (!steps || !steps.length) {
+    $("evo-panel").hidden = true;
+    return;
+  }
+  $("evo-panel").hidden = false;
+  const corrections = steps.reduce((n, s) => n + s.did.length, 0);
+  $("evo-note").textContent =
+    `${steps.length} listen-backs, ${corrections} corrections`;
+
+  host.innerHTML = steps.map((step) => {
+    const heard = step.heard.length
+      ? step.heard.map((h) =>
+          `<span class="chip" title="${h.attribution}">${h.principle} ${h.measured}</span>`).join("")
+      : `<span class="chip ok">nothing to correct</span>`;
+    const did = step.did.length
+      ? step.did.map((d) =>
+          `<div class="did"><code>${d.drive}</code> ${d.before} &rarr; ${d.after}
+           <span class="note">${d.because}</span></div>`).join("")
+      : `<div class="did note">held its ground</div>`;
+    return `<div class="evo-step">
+      <div class="evo-head"><b>${step.name}</b>
+        <span class="note">beat ${step.at} · plasticity ${step.plasticity} · unrest ${step.unrest}</span>
+      </div>
+      <div class="evo-heard">${heard}</div>
+      ${did}
+    </div>`;
+  }).join("");
+}
+
 /* ---------- actions ---------- */
 
 function setStatus(text, kind) {
@@ -193,6 +226,7 @@ async function makeTrack() {
     $("dl-formula").href = data.formula_url;
     $("dl-formula").setAttribute("download", data.formula_file);
 
+    drawEvolution(data.evolution);
     setDelivery(true, data);
     drawWave(data.peaks, data.movements, data.duration);
     drawMarks(data.movements, data.duration);
