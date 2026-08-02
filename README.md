@@ -12,7 +12,22 @@ identical track, byte for byte.
 It will sound strange. That is the point; it is an experiment in letting the
 computation carry itself rather than execute something a person wrote.
 
-## Running it
+## Play it in a browser
+
+**<https://elifterminal.github.io/CompEx/play/>** — works on a phone.
+
+It composes and plays on the device. Nothing is uploaded; the only download is
+the engine itself, and after the first visit that is cached. Long tracks stream:
+spans are rendered a few seconds ahead of the playhead, so playback starts in
+about six seconds whether the track is one minute or thirty, and you watch the
+composer change its mind as it goes.
+
+The player runs *this package*, shipped as source and executed by Pyodide — not
+a JavaScript port. A port would be a second engine that disagreed with this one
+the first time either was touched. `docs/check_page.py` fails the build if the
+shipped archive falls behind the source.
+
+## Running it locally
 
 numpy is the only dependency. ffmpeg is optional and only needed for MP3.
 
@@ -165,10 +180,11 @@ seeking is free and nothing desyncs.
 python3 -m unittest discover -s tests -t .
 ```
 
-109 tests. The ones that matter most: every engine, drum and effect renders
+127 tests. The ones that matter most: every engine, drum and effect renders
 finite audible audio at every register, every theme renders without blowing
-up, every note names a voice that exists, and a track's own formula
-reproduces it exactly.
+up, every note names a voice that exists, a track's own formula reproduces it
+exactly, and a piece rendered span-by-span for streaming still adds up to the
+same piece without clicking at the seams.
 
 ## Not built yet
 

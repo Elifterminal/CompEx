@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>CompEx — player</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="mark">∿</span><h1>CompEx</h1></div>
+  <a class="out" href="../">notebook</a>
+</header>
+
+<div id="boot" class="boot">
+  <div class="spinner"></div>
+  <p id="boot-msg">starting the engine…</p>
+  <p class="hint">First load fetches Python and numpy — around 15&nbsp;MB. After that it is cached.</p>
+</div>
+
+<main id="app" hidden>
+
+  <section class="card">
+    <h2>feeling</h2>
+    <div id="themes" class="chips"></div>
+    <details id="advanced">
+      <summary>mood axes</summary>
+      <div id="axes"></div>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>length</h2>
+    <div class="knob">
+      <div class="knob-top"><span id="v-duration" class="val">5m 00s</span></div>
+      <input type="range" id="duration" min="30" max="1800" step="30" value="300">
+    </div>
+    <p class="hint">Long tracks are the point — the composer only gets to change its
+       mind between movements, so give it room.</p>
+    <div class="row">
+      <label for="seed">seed</label>
+      <input id="seed" type="number" min="0" max="2147483647" value="9042">
+      <button id="reseed" class="ghost">⟳</button>
+    </div>
+  </section>
+
+  <section class="card" id="now" hidden>
+    <h2>playing</h2>
+    <div class="meta">
+      <div><span class="k">theme</span><span class="v" id="m-theme">—</span></div>
+      <div><span class="k">tempo</span><span class="v" id="m-bpm">—</span></div>
+      <div><span class="k">mode</span><span class="v" id="m-scale">—</span></div>
+      <div><span class="k">form</span><span class="v" id="m-form">—</span></div>
+    </div>
+    <div class="bar"><div id="played" class="played"></div><div id="buffered" class="buffered"></div></div>
+    <div class="times"><span id="t-now">0:00</span><span id="t-move">—</span><span id="t-total">0:00</span></div>
+  </section>
+
+  <section class="card" id="evo-card" hidden>
+    <h2>how it is changing its mind</h2>
+    <div id="evolution"></div>
+  </section>
+
+  <section class="card" id="detail-card" hidden>
+    <details>
+      <summary>what it built</summary>
+      <pre id="m-summary" class="mono"></pre>
+    </details>
+    <details>
+      <summary>the formula it wrote</summary>
+      <pre id="m-formula" class="mono"></pre>
+    </details>
+  </section>
+
+</main>
+
+<footer class="dock" id="dock" hidden>
+  <button id="play" class="primary">Play</button>
+  <button id="stop" disabled>Stop</button>
+  <a id="save" class="button disabled" download>Save WAV</a>
+  <span id="status" class="status">ready</span>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

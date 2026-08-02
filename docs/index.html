@@ -70,6 +70,18 @@ go stale.</p>
 </header>
 
 <div class="card">
+<h2 style="margin-top:0">Hear it</h2>
+<p><a href="play/" style="color:var(--accent);font-size:17px;font-weight:600">Open the player &rarr;</a>
+&nbsp;<span class="sub">Runs in a browser, phone included. It composes and plays on the
+device — nothing is uploaded, nothing is downloaded but the engine itself.</span></p>
+<div class="read"><b>The player runs this exact package, not a re-implementation.</b> The engine
+is shipped as source and executed in the browser by Pyodide, so the phone and the desktop cannot
+drift apart. A JavaScript port would have been three thousand lines of duplicate engine that
+disagreed with this one the first time either was touched. The build fails if the shipped
+archive falls behind the source.</div>
+</div>
+
+<div class="card">
 <h2 style="margin-top:0">The short version</h2>
 <div class="read"><b>Three inputs: how long, how it should feel, and a seed.</b> Everything
 else — tempo, meter, key, mode, chord progression, the motif, the shape of the piece, which

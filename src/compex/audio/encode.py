@@ -8,8 +8,12 @@ producing a zero-byte file.
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
+
+# subprocess is imported inside the encode call, not here. The engine also runs
+# in the browser under Pyodide, which has no subprocess at all — importing it at
+# module level would take the whole package down on a platform that never needed
+# MP3 in the first place.
 
 FFMPEG = "ffmpeg"
 DEFAULT_BITRATE = "192k"
@@ -44,6 +48,11 @@ def to_mp3(wav_path: str | Path, bitrate: str = DEFAULT_BITRATE,
         "-codec:a", "libmp3lame", "-b:a", str(bitrate),
         str(target),
     ]
+    try:
+        import subprocess
+    except ImportError as exc:  # pragma: no cover - only true in the browser
+        raise EncodeError("no subprocess on this platform — MP3 export unavailable") from exc
+
     try:
         result = subprocess.run(command, capture_output=True, text=True,
                                 timeout=ENCODE_TIMEOUT_S, check=False)

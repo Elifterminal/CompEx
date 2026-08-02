@@ -128,12 +128,41 @@ def check_has_negatives(page: str) -> None:
         raise CheckFailed("no open questions on the page")
 
 
+def check_player_engine_is_current(page: str) -> None:
+    """The browser player ships the engine as a zip — fail if it is stale.
+
+    A port to JavaScript was avoided precisely so the phone and the desktop
+    cannot drift apart. Shipping a stale archive would reintroduce that drift
+    silently, which is worse than the port would have been.
+    """
+    stamp_path = ROOT / "docs" / "play" / "engine.json"
+    archive = ROOT / "docs" / "play" / "compex-src.zip"
+    if not archive.is_file() or not stamp_path.is_file():
+        raise CheckFailed("player engine archive missing — run docs/build_player.py")
+
+    sys.path.insert(0, str(ROOT / "docs"))
+    from build_player import fingerprint, sources  # noqa: E402
+
+    stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    current = fingerprint(sources())
+    if stamp.get("fingerprint") != current:
+        raise CheckFailed(
+            f"player engine is stale: archive built from {stamp.get('fingerprint')}, "
+            f"sources are now {current}. Rerun docs/build_player.py."
+        )
+    if stamp.get("version") != __version__:
+        raise CheckFailed(
+            f"player engine built for v{stamp.get('version')}, package is v{__version__}"
+        )
+
+
 RULES = (
     ("h1 names the project", check_h1_names_the_project),
     ("title names the project", check_title),
     ("counts match the live code", check_counts_match_code),
     ("no external requests", check_self_contained),
     ("negatives and open questions present", check_has_negatives),
+    ("player engine matches the source", check_player_engine_is_current),
 )
 
 
@@ -147,6 +176,29 @@ def run(page: str) -> list[str]:
         except CheckFailed as exc:
             failures.append(f"{name}: {exc}")
     return failures
+
+
+def _with_stale_engine_stamp():
+    """Corrupt the engine stamp on disk, prove the rule fires, then restore it.
+
+    This one cannot be faked by mutating the page string — the check reads the
+    filesystem — so the file is temporarily damaged and put back.
+    """
+    stamp_path = ROOT / "docs" / "play" / "engine.json"
+    if not stamp_path.is_file():
+        return None
+    original = stamp_path.read_text(encoding="utf-8")
+    try:
+        broken = json.loads(original)
+        broken["fingerprint"] = "0" * 32
+        stamp_path.write_text(json.dumps(broken), encoding="utf-8")
+        try:
+            check_player_engine_is_current("")
+        except CheckFailed:
+            return True
+        return False
+    finally:
+        stamp_path.write_text(original, encoding="utf-8")
 
 
 def self_test(page: str) -> int:
@@ -172,6 +224,17 @@ def self_test(page: str) -> int:
         else:
             print(f"  MISSED: {label}  <-- a rule is not working")
             bad += 1
+
+    # The engine-archive rule reads the filesystem, so it cannot be provoked by
+    # mutating the page text. Damage the stamp on disk instead, then restore it.
+    fired = _with_stale_engine_stamp()
+    if fired is None:
+        print("  skipped: player engine gone stale (no archive built yet)")
+    elif fired:
+        print("  caught: player engine gone stale")
+    else:
+        print("  MISSED: player engine gone stale  <-- a rule is not working")
+        bad += 1
     return bad
 
 
