@@ -9,7 +9,8 @@ import unittest
 import numpy as np
 
 from compex.dsp import drums, effects, engines
-from compex.dsp.engines import ENGINE_NAMES, NOTE_PEAK
+from compex.dsp import fx
+from compex.dsp.engines import ENGINE_NAMES, NOTE_CEILING, NOTE_LOUDNESS
 from compex.generate import THEMES
 from compex.generate.palette import (
     DRUM_COLOUR,
@@ -68,12 +69,25 @@ class EngineTests(unittest.TestCase):
             self.assertGreater(float(np.sqrt((voice ** 2).mean())), 0.005, f"{name} is silent")
 
     def test_engines_come_out_at_a_comparable_level(self):
-        """Otherwise the composer's per-voice gain means something different each time."""
-        peaks = [float(np.max(np.abs(engines.render_note(_spec(name), 220.0,
-                                                         int(0.8 * SR), SR, 7, 0))))
-                 for name in ENGINE_NAMES]
-        self.assertLessEqual(max(peaks), NOTE_PEAK + 1e-6)
-        self.assertGreater(min(peaks), NOTE_PEAK * 0.8)
+        """Otherwise the composer's per-voice gain means something different each time.
+
+        Comparable in *loudness*, not in peak. Peak-matching was the original
+        rule and it was quietly wrong — a swelling pad and a plucked string
+        reach the same height and nothing like the same volume, which is how
+        the pads ended up inaudible under everything else.
+
+        The floor is generous because it has to be: a very spiky engine runs
+        into the clipping ceiling before it reaches the loudness target, and
+        holding it back there is the correct answer rather than a failure.
+        """
+        rendered = [engines.render_note(_spec(name), 220.0, int(0.8 * SR), SR, 7, 0)
+                    for name in ENGINE_NAMES]
+        levels = [fx.short_term_rms(voice, SR) for voice in rendered]
+        peaks = [float(np.max(np.abs(voice))) for voice in rendered]
+
+        self.assertLessEqual(max(levels), NOTE_LOUDNESS * 1.35)
+        self.assertGreater(min(levels), NOTE_LOUDNESS * 0.2)
+        self.assertLessEqual(max(peaks), NOTE_CEILING + 1e-6)
 
     def test_engines_are_deterministic(self):
         for name in ENGINE_NAMES:
@@ -98,10 +112,20 @@ class DrumTests(unittest.TestCase):
             self.assertGreater(float(np.max(np.abs(sample))), 0.1, f"{name} is silent")
 
     def test_drums_come_out_at_a_comparable_level(self):
-        peaks = [float(np.max(np.abs(drums.render_drum(_drum(7, name, 0, MOOD), SR, 7, 0))))
-                 for name in drums.DRUM_NAMES]
-        self.assertLessEqual(max(peaks), drums.HIT_PEAK + 1e-6)
-        self.assertGreater(min(peaks), drums.HIT_PEAK * 0.8)
+        """Loudness again, not peak — same argument as the pitched engines.
+
+        A click and a boom matched by peak are not matched by anything a
+        listener has; matched by loudness they are, right up until the click's
+        crest factor runs it into the ceiling.
+        """
+        rendered = [drums.render_drum(_drum(7, name, 0, MOOD), SR, 7, 0)
+                    for name in drums.DRUM_NAMES]
+        levels = [fx.short_term_rms(sample, SR) for sample in rendered]
+        peaks = [float(np.max(np.abs(sample))) for sample in rendered]
+
+        self.assertLessEqual(max(levels), drums.HIT_LOUDNESS * 1.35)
+        self.assertGreater(min(levels), drums.HIT_LOUDNESS * 0.2)
+        self.assertLessEqual(max(peaks), drums.HIT_CEILING + 1e-6)
 
     def test_unknown_drum_is_rejected(self):
         with self.assertRaises(ValueError):

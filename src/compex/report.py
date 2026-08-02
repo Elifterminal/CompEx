@@ -177,6 +177,28 @@ def hindsight(composition: Composition) -> dict | None:
     }
 
 
+def mix(decided) -> dict:
+    """What the mixer measured and what it did about it."""
+    from compex.dsp.balance import BAND_NAMES
+
+    return {
+        "percussive": round(decided.percussive, 4),
+        "summary": decided.summary(),
+        "buried": list(decided.buried()),
+        "still_buried": list(decided.still_buried()),
+        "voices": [{"voice": voice.voice,
+                    "role": voice.role,
+                    "home": BAND_NAMES[voice.home],
+                    "share": round(voice.best_share, 4),
+                    "after": round(voice.after, 4),
+                    "floor": round(voice.floor(), 4),
+                    "trim": round(voice.trim, 3),
+                    "plays": round(voice.presence, 3),
+                    "note": voice.describe()}
+                   for voice in sorted(decided.voices, key=lambda v: -v.best_share)],
+    }
+
+
 def taste(composition: Composition) -> dict:
     """What the composer listens for now, against what it started out listening for."""
     now, start = composition.taste, composition.opening_taste

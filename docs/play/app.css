@@ -164,6 +164,17 @@ pre {
         border: 1px solid var(--line); }
 .obar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 
+/* the mix */
+.mixrows { display: grid; gap: 4px; margin-bottom: 10px; }
+.mixrow { display: grid; grid-template-columns: 104px 1fr 58px; gap: 8px; align-items: center;
+          font-size: 12px; }
+.mbar { position: relative; height: 8px; border-radius: 999px; background: var(--panel-2);
+        border: 1px solid var(--line); }
+.mbar i { display: block; height: 100%; border-radius: 999px; background: var(--dim); }
+.mbar em { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--warn); }
+.mixrow.lifted .mbar i { background: var(--accent-2); }
+.mixrow.held .mbar i { background: var(--accent); }
+
 /* hindsight */
 .hindsight { display: grid; gap: 5px; margin-bottom: 10px; }
 .reveal { display: grid; grid-template-columns: 88px 1fr 44px; gap: 8px; align-items: center;

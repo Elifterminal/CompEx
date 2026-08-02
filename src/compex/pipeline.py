@@ -15,7 +15,8 @@ import numpy as np
 
 from compex.audio import encode, write_wav
 from compex.config import SAMPLE_RATE, Knobs
-from compex.dsp.arrange import ProgressFn, render_composition
+from compex.dsp.arrange import ProgressFn, render_composition, survey
+from compex.dsp.balance import Mix
 from compex.generate import Composition, Mood, compose
 from compex.notation import emit
 
@@ -27,6 +28,7 @@ class RenderResult:
     formula: str
     knobs: Knobs
     mood: Mood
+    mix: Mix = Mix()
 
     @property
     def duration_s(self) -> float:
@@ -68,4 +70,5 @@ def make_track(knobs: Knobs, mood: Mood, progress: ProgressFn = None) -> RenderR
         formula=emit(composition, knobs.duration_s),
         knobs=knobs,
         mood=mood,
+        mix=survey(composition),
     )

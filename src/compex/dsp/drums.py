@@ -15,7 +15,12 @@ from compex.generate.palette import VoiceSpec
 MAX_SECONDS = 1.4
 
 #: Every one-shot leaves at this peak, so drums are comparable to each other.
+#: A hit leaves here at the same loudness a note does, so "gain 0.8" means one
+#: thing whether it lands on a kick or a flute. The ceiling is what keeps a
+#: click from taking the peak with it.
+HIT_LOUDNESS = 0.42
 HIT_PEAK = 0.95
+HIT_CEILING = 0.99
 
 
 def render_drum(spec: VoiceSpec, sample_rate: int, seed: int, index: int) -> np.ndarray:
@@ -28,9 +33,8 @@ def render_drum(spec: VoiceSpec, sample_rate: int, seed: int, index: int) -> np.
     # means one thing whichever drum it picked.
     sample = np.nan_to_num(voice(spec, sample_rate, seed, index),
                            nan=0.0, posinf=0.0, neginf=0.0)
-    peak = float(np.max(np.abs(sample))) if len(sample) else 0.0
-    if peak > 1e-9:
-        sample = sample * (HIT_PEAK / peak)
+    sample = fx.loudness_normalise(sample, sample_rate, HIT_LOUDNESS,
+                                   peak=HIT_PEAK, ceiling=HIT_CEILING)
     return fx.fade_edges(sample, sample_rate, 0.002)
 
 

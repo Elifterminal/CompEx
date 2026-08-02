@@ -156,6 +156,45 @@ PURPOSE_SECONDS = 240.0
 HINDSIGHT_THEMES = ("serene", "wistful", "hypnotic", "menacing", "frantic")
 HINDSIGHT_SECONDS = 300.0
 
+MIX_THEMES = ("serene", "wistful", "hypnotic", "solemn", "menacing", "frantic")
+MIX_SECONDS = 120.0
+
+#: Measured on the build before the mixer existed, seed 7788, two minutes each.
+#: Kept as numbers rather than as a memory of them, because the whole claim is
+#: that this was arithmetic and not taste.
+PERCUSSION_BEFORE = {"hypnotic": 2.39, "menacing": 1.47, "serene": 0.43}
+
+
+def mix_survey() -> dict:
+    """What the mixer measures across a spread of moods, and what it fixes."""
+    from compex.dsp.arrange import survey
+
+    rows = []
+    for name in MIX_THEMES:
+        piece = compose(7788, MIX_SECONDS, THEMES[name])
+        decided = survey(piece)
+        rows.append({
+            "theme": name,
+            "mix": decided,
+            "voices": len(decided.voices),
+            "percussive": decided.percussive,
+            "buried": decided.buried(),
+            "still": decided.still_buried(),
+            "lifted": sum(1 for v in decided.voices if v.trim > 1.02),
+            "cut": sum(1 for v in decided.voices if v.trim < 0.98),
+        })
+    found = sum(len(row["buried"]) for row in rows)
+    left = sum(len(row["still"]) for row in rows)
+    return {
+        "rows": rows,
+        "example": rows[MIX_THEMES.index("hypnotic")],
+        "found": found,
+        "rescued": found - left,
+        "left": left,
+        "percussive": statistics.mean([row["percussive"] for row in rows]),
+        "loudest": max(rows, key=lambda row: row["percussive"]),
+    }
+
 
 def hindsight_survey() -> dict:
     """Measure what each piece's ending gave back to its beginning.
@@ -1131,6 +1170,110 @@ Unpaid longing becomes audible as the thing the piece decided not to do.</div>
 """
 
 
+def panel_mix(survey) -> str:
+    from compex.dsp.balance import BAND_NAMES, CEILING, FLOOR
+    from compex.dsp.engines import NOTE_LOUDNESS
+
+    example = survey["example"]
+    rows = "".join(
+        f"<tr><td><b>{row['theme']}</b></td><td>{row['voices']}</td>"
+        f"<td>{row['percussive'] * 100:.0f}%</td>"
+        f"<td>{row['lifted']} up, {row['cut']} down</td>"
+        f"<td class='sub'>{', '.join(row['buried']) or '—'}</td>"
+        f"<td class='sub'>{', '.join(row['still']) or '—'}</td></tr>"
+        for row in survey["rows"])
+
+    roles = "".join(
+        f"<tr><td><b>{role}</b></td><td>{FLOOR[role] * 100:.0f}%</td>"
+        f"<td>{CEILING[role] * 100:.0f}%</td></tr>"
+        for role in FLOOR)
+
+    voices = "".join(
+        f"<tr><td><code>{voice.voice}</code></td><td class='sub'>{voice.role}</td>"
+        f"<td>{BAND_NAMES[voice.home]}</td>"
+        f"<td>{voice.best_share * 100:.0f}%</td>"
+        f"<td>{voice.after * 100:.0f}%</td>"
+        f"<td>{voice.trim:.2f}&times;</td></tr>"
+        for voice in sorted(example["mix"].voices, key=lambda v: -v.best_share))
+
+    before = ", ".join(f"{name} {ratio:.2f}&times;"
+                       for name, ratio in PERCUSSION_BEFORE.items())
+
+    return f"""
+<h2 style="margin-top:26px">The mix</h2>
+<p class="sub">Added after the first real listening complaint: things were getting buried, the
+drums were winning, and the breath was too far forward. All three turned out to be arithmetic.</p>
+
+<div class="read warn"><b>Until this existed, nothing mixed anything.</b> There was a table — bass
+0.90, lead 0.67, pad 0.34, texture 0.23 — plus a random gain per drum, one sidechain duck, and a
+limiter. Nothing measured whether a voice could be heard, so the listening loop could not have
+fixed a buried one even in principle.</div>
+
+<h3>Three faults, all measurable</h3>
+<p><b>Every note was normalised to the same peak.</b> Peak is how tall a sound is, not how loud.
+A swelling pad and a plucked string reach the same height and nothing like the same volume, so the
+pads carrying the non-percussive body of the piece were quietly a third of what they looked.
+Now each note is levelled by the loudness of its loudest quarter-second, with some credit still
+given to its peak — because a transient <i>is</i> heard as louder than its RMS, and matching pure
+loudness makes plucks vanish the other way. Target loudness {NOTE_LOUDNESS:g}.</p>
+
+<p><b>Six drums were six times one drum.</b> Each was given a gain as if it played alone. Measured
+on the previous build: {before} — percussion against everything melodic. The kit is now held back
+by the square root of its own size, which is roughly how loudness adds when hits are not
+simultaneous.</p>
+
+<p><b>Breath was a blind draw.</b> The flute's air was picked uniformly from 0.10 to 0.55 and the
+reed's from 0.03 to 0.30, which is the one place a mix decision was left to a dice roll — against
+this project's own rule that anything chosen is chosen by character. Air now comes from the mood,
+and a dense piece gets less of it than a sparse one however bright it is, because air is the first
+thing that muddies a crowded arrangement.</p>
+
+<h3>Then: measure who is actually audible</h3>
+<p>Every voice is rendered once — a representative note, through its own effects chain, since a
+reverb or a ring modulator changes where a voice lives — and its energy counted in five bands.
+Multiplied by how much that voice plays, that says what it contributes to each band. A voice
+<i>lives</i> in the band holding most of its own energy; the question is who else is there.</p>
+
+<table><thead><tr><th>role</th><th>should own at least</th><th>and at most</th></tr></thead>
+<tbody>{roles}</tbody></table>
+<p class="sub">Bands: {", ".join(BAND_NAMES)}. The floor scales with how much a voice plays —
+a texture that speaks four times in five minutes is not buried, it is occasional, and shouting it
+forward would overrule the composer's own sparseness.</p>
+
+<div class="grid">
+<div class="stat"><div class="n">{survey['percussive'] * 100:.0f}%</div>
+  <div class="k">percussive, averaged over {len(MIX_THEMES)} moods</div></div>
+<div class="stat"><div class="n">{survey['found']}</div><div class="k">buried voices found</div></div>
+<div class="stat"><div class="n">{survey['rescued']}</div><div class="k">brought back by trimming</div></div>
+<div class="stat"><div class="n">{survey['left']}</div><div class="k">still buried afterwards</div></div>
+</div>
+
+<table><thead><tr><th>theme</th><th>voices</th><th>percussive</th><th>trims</th>
+<th>buried</th><th>still buried</th></tr></thead><tbody>{rows}</tbody></table>
+
+<h3>One piece, voice by voice</h3>
+<p class="sub">{example['theme']}, seed 7788, {MIX_SECONDS:.0f} seconds.
+"before" and "after" are the share of its home band the voice owns.</p>
+<table><thead><tr><th>voice</th><th>role</th><th>lives in</th><th>before</th><th>after</th>
+<th>trim</th></tr></thead><tbody>{voices}</tbody></table>
+
+<div class="read"><b>Some voices cannot be rescued by gain, and the page says so.</b> A drum at 1%
+of a band three other drums are already fighting over needs about ten times its level to be heard,
+which is not a mix decision, it is an arrangement problem. The stage reports what it could not fix
+rather than quietly lifting until something clips.</div>
+
+<div class="q"><b>Open: the composer still cannot hear the mix.</b> This is a mixer — it runs after
+composition, it never sees the critic, and no principle measures balance. So a piece that writes
+four voices into the same band gets a good mix of a crowded arrangement rather than being told to
+write a less crowded one. Making balance a principle the composer answers to is the obvious next
+step, and it is not built.</div>
+
+<div class="q"><b>Open: the floors and ceilings are mine.</b> Same objection as the aesthetic bands
+and the opening taste curve, one layer along. They are measured against real pieces, which catches
+the gross errors, but 9% for a pad rather than 12% is a judgement nobody has argued with yet.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -1202,6 +1345,7 @@ def build() -> str:
     choices = choice_survey()
     purpose = purpose_survey()
     hindsight = hindsight_survey()
+    mixing = mix_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -1277,6 +1421,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <button class="tab" data-panel="evolve">How it changes its mind</button>
 <button class="tab" data-panel="choose">Choosing, not reciting</button>
 <button class="tab" data-panel="purpose">What is it for?</button>
+<button class="tab" data-panel="mix">The mix</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
@@ -1288,6 +1433,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <div class="panel" id="evolve">{panel_evolve(series, example)}</div>
 <div class="panel" id="choose">{panel_choose(choices)}</div>
 <div class="panel" id="purpose">{panel_purpose(purpose, hindsight)}</div>
+<div class="panel" id="mix">{panel_mix(mixing)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

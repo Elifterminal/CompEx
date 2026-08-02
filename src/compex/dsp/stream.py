@@ -25,13 +25,14 @@ from dataclasses import dataclass
 import numpy as np
 
 from compex.config import SAMPLE_RATE
-from compex.dsp import drums, effects, engines, filters, fx
+from compex.dsp import arrange, drums, effects, engines, filters, fx
 from compex.dsp.arrange import (
     DUCK_DEPTH,
     DUCK_RELEASE,
     TAIL_SECONDS,
     VARIANTS,
     _note_samples,
+    kit_trim,
 )
 from compex.generate.compose import Composition
 from compex.generate.palette import ROLE_PERC
@@ -112,9 +113,17 @@ def plan(composition: Composition, span_seconds: float = DEFAULT_SPAN_SECONDS) -
 
 
 def render_span(composition: Composition, span: Span, carry: np.ndarray | None = None,
-                master_gain: float = 0.89,
-                level: Level | None = None) -> tuple[np.ndarray, np.ndarray, Level]:
-    """Render one span. Returns its samples, the overhang, and the level state."""
+                master_gain: float = 0.89, level: Level | None = None,
+                trims: dict[str, float] | None = None
+                ) -> tuple[np.ndarray, np.ndarray, Level]:
+    """Render one span. Returns its samples, the overhang, and the level state.
+
+    ``trims`` are the mixer's per-voice decisions. They are computed once for
+    the whole piece and passed in rather than recomputed per span, because a
+    voice's place in the mix is a property of the piece — and because the
+    phone and the desktop have to arrive at the same balance or they are not
+    playing the same music.
+    """
     if not 0.0 < master_gain <= 1.0:
         raise ValueError(f"master_gain must be in (0, 1], got {master_gain}")
     if level is None:
@@ -128,8 +137,10 @@ def render_span(composition: Composition, span: Span, carry: np.ndarray | None =
     melodic = np.zeros(total, dtype=np.float64)
     percussion = np.zeros(total, dtype=np.float64)
 
-    _voices_in_span(melodic, composition, span, seconds_per_beat, total)
-    _strokes_in_span(percussion, composition, span, seconds_per_beat, total)
+    if trims is None:
+        trims = arrange.survey(composition).trims()
+    _voices_in_span(melodic, composition, span, seconds_per_beat, total, trims)
+    _strokes_in_span(percussion, composition, span, seconds_per_beat, total, trims)
     melodic *= _duck(total, composition, span, seconds_per_beat)
 
     mix = filters.highpass(melodic + percussion, SAMPLE_RATE, 24.0)
@@ -166,7 +177,7 @@ def finish(carry: np.ndarray | None, level: Level | None,
     return fx.limit(trimmed * (level.gain if level else master_gain))
 
 
-def _voices_in_span(bus, composition, span, seconds_per_beat, total) -> None:
+def _voices_in_span(bus, composition, span, seconds_per_beat, total, trims=None) -> None:
     specs = {v.voice_id: v for v in composition.voices if v.role != ROLE_PERC}
     grouped: dict[str, list] = {}
     for note in composition.notes:
@@ -192,11 +203,12 @@ def _voices_in_span(bus, composition, span, seconds_per_beat, total) -> None:
                     _offset(note.start, span.start_beat, seconds_per_beat))
         if spec.effects:
             scratch = effects.apply_chain(scratch, SAMPLE_RATE, spec.effects)
-        bus += scratch * spec.gain
+        bus += scratch * spec.gain * (trims or {}).get(voice_id, 1.0)
 
 
-def _strokes_in_span(bus, composition, span, seconds_per_beat, total) -> None:
+def _strokes_in_span(bus, composition, span, seconds_per_beat, total, trims=None) -> None:
     kit = {v.voice_id: v for v in composition.voices if v.role == ROLE_PERC}
+    trim = kit_trim(len(kit))
     cache: dict[tuple[str, int], np.ndarray] = {}
     for order, stroke in enumerate(composition.strokes):
         if not (span.start_beat <= stroke.start < span.end_beat):
@@ -210,7 +222,8 @@ def _strokes_in_span(bus, composition, span, seconds_per_beat, total) -> None:
         if sample is None:
             sample = drums.render_drum(spec, SAMPLE_RATE, composition.seed, variant)
             cache[key] = sample
-        _add_at(bus, sample * stroke.velocity * spec.gain,
+        _add_at(bus, sample * stroke.velocity * spec.gain * trim
+                * (trims or {}).get(stroke.voice, 1.0),
                 _offset(stroke.start, span.start_beat, seconds_per_beat))
 
 

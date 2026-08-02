@@ -21,8 +21,13 @@ ENGINES = {
 }
 ENGINE_NAMES: tuple[str, ...] = tuple(sorted(ENGINES))
 
-#: Every note leaves an engine at this peak, so engines are comparable.
+#: Every note leaves an engine at this *loudness*, so engines are comparable.
+#: Peak-matching was the old rule and it was quietly wrong: it made a plucked
+#: note and a sustained pad nominally equal and audibly nothing of the sort.
+NOTE_LOUDNESS = 0.42
+#: The height a transient still gets some credit for — see ``fx.CREST_TILT``.
 NOTE_PEAK = 0.9
+NOTE_CEILING = 0.97
 
 
 def render_note(spec, freq: float, count: int, sample_rate: int,
@@ -46,9 +51,8 @@ def render_note(spec, freq: float, count: int, sample_rate: int,
     # Engines differ in natural level by more than 50x — a self-oscillating
     # resonance is tiny, a sine is not. Normalising here is what lets the
     # composer's per-voice gain mean the same thing whatever engine it picked.
-    peak = float(np.max(np.abs(voice))) if len(voice) else 0.0
-    if peak > 1e-9:
-        voice = voice * (NOTE_PEAK / peak)
+    voice = fx.loudness_normalise(voice, sample_rate, NOTE_LOUDNESS,
+                                  peak=NOTE_PEAK, ceiling=NOTE_CEILING)
 
     return fx.fade_edges(voice, sample_rate, 0.003)
 

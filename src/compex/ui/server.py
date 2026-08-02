@@ -127,6 +127,7 @@ class CompexHandler(BaseHTTPRequestHandler):
             "patterns": report.patterns(result.composition),
             "taste": report.taste(result.composition),
             "ledger": report.ledger(result.composition),
+            "mix": report.mix(result.mix),
             "hindsight": report.hindsight(result.composition),
         }
 

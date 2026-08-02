@@ -40,6 +40,60 @@ def resample_crush(signal: np.ndarray, hold: int) -> np.ndarray:
     return np.repeat(kept, hold)[: len(signal)]
 
 
+LOUDNESS_WINDOW = 0.25   # seconds — long enough to average a note, short enough to catch a hit
+
+
+def short_term_rms(signal: np.ndarray, sample_rate: int,
+                   window: float = LOUDNESS_WINDOW) -> float:
+    """RMS of the loudest quarter-second.
+
+    Peak says how *tall* a sound is; this says how loud it is. The difference
+    is not academic — a slow pad and a plucked note normalised to the same
+    peak arrive nowhere near each other, which is most of why the pads in this
+    engine were inaudible under everything else.
+    """
+    if len(signal) == 0:
+        return 0.0
+    span = min(len(signal), max(1, int(window * sample_rate)))
+    if len(signal) <= span:
+        return float(np.sqrt(np.mean(signal ** 2)))
+    energy = np.concatenate(([0.0], np.cumsum(signal ** 2)))
+    windows = energy[span:] - energy[:-span]
+    return float(np.sqrt(max(0.0, windows.max()) / span))
+
+
+#: How much of the old peak-matching survives. 0 is pure loudness, 1 is what
+#: the engine used to do.
+CREST_TILT = 0.35
+
+
+def loudness_normalise(signal: np.ndarray, sample_rate: int, target: float,
+                       peak: float = 0.9, ceiling: float = 0.99,
+                       tilt: float = CREST_TILT) -> np.ndarray:
+    """Level a sound by loudness, with some credit still given to its peak.
+
+    Pure peak matching was the old rule and it buried every pad: a slow swell
+    and a plucked note reach the same height and nothing like the same volume.
+    Pure loudness matching overcorrects the other way — a transient is *heard*
+    as louder than its RMS says, so matching RMS makes plucks and hits vanish
+    instead. Neither extreme is right, so this takes a weighted geometric mean
+    of the two scale factors and then refuses to clip.
+    """
+    if len(signal) == 0 or target <= 0:
+        return signal
+    level = short_term_rms(signal, sample_rate)
+    height = float(np.max(np.abs(signal)))
+    if level <= 1e-9 or height <= 1e-9:
+        return signal
+
+    scale = (target / level) ** (1.0 - tilt) * (peak / height) ** tilt
+    scaled = signal * scale
+    loudest = float(np.max(np.abs(scaled)))
+    if loudest > ceiling:
+        scaled = scaled * (ceiling / loudest)
+    return scaled
+
+
 def peak_normalise(signal: np.ndarray, peak: float = 0.97) -> np.ndarray:
     """Scale so the loudest sample sits at ``peak``. Silence passes through."""
     if not 0.0 < peak <= 1.0:

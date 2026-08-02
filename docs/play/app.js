@@ -297,6 +297,18 @@ function drawChoices(info) {
     </div>`;
   }).join("");
 
+  const mix = info.mix;
+  if (mix && mix.voices.length) {
+    $("mix").innerHTML = `<h3 class="mini">the mix it decided on</h3>
+      <div class="hint">${mix.summary}</div>` + mix.voices.map((v) => {
+      const state = v.trim > 1.02 ? " lifted" : v.trim < 0.98 ? " held" : "";
+      return `<div class="mixrow${state}"><b>${v.voice}</b>
+        <span class="mbar"><i style="width:${Math.min(100, v.share * 100)}%"></i>
+          <em style="left:${Math.min(100, v.floor * 100)}%"></em></span>
+        <span class="hint">${v.home}</span></div>`;
+    }).join("");
+  }
+
   const reveal = info.hindsight;
   if (reveal) {
     $("hindsight").innerHTML = `<h3 class="mini">what the ending explained</h3>

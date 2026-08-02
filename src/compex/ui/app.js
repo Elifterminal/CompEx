@@ -194,10 +194,34 @@ function drawChoices(data) {
     : "";
 
   $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  drawMix(data.mix);
   drawHindsight(data.hindsight);
   drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
+}
+
+function drawMix(mix) {
+  const host = $("mix");
+  if (!mix || !mix.voices.length) { host.innerHTML = `<p class="note">not measured</p>`; return; }
+  const rows = mix.voices.map((v) => {
+    const state = v.trim > 1.02 ? " lifted" : v.trim < 0.98 ? " held" : "";
+    const floor = Math.min(100, v.floor * 100);
+    return `<div class="mixrow${state}">
+      <code>${v.voice}</code>
+      <span class="mbar" title="floor for a ${v.role} that plays this much: ${(v.floor * 100).toFixed(0)}%">
+        <i style="width:${Math.min(100, v.share * 100)}%"></i>
+        <b style="left:${floor}%"></b>
+      </span>
+      <span class="note">${v.home} · ${(v.share * 100).toFixed(0)}%
+        ${v.trim !== 1 ? `&rarr; ${(v.after * 100).toFixed(0)}% at ${v.trim}&times;` : ""}</span>
+    </div>`;
+  }).join("");
+  const stuck = mix.still_buried.length
+    ? `<p class="note">gain could not rescue: <b>${mix.still_buried.join(", ")}</b> —
+       too many voices in one band, which is an arrangement problem rather than a mix one</p>`
+    : "";
+  host.innerHTML = `<div class="note">${mix.summary}</div>${rows}${stuck}`;
 }
 
 function drawHindsight(reveal) {

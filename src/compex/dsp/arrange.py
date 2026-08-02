@@ -17,16 +17,63 @@ from typing import Callable, Optional
 import numpy as np
 
 from compex.config import SAMPLE_RATE
-from compex.dsp import drums, effects, engines, filters, fx
+from compex.dsp import balance, drums, effects, engines, filters, fx
 from compex.generate.compose import Composition
 from compex.generate.palette import ROLE_PAD, ROLE_PERC, VoiceSpec
 
 TAIL_SECONDS = 3.5
+REFERENCE_KIT = 3.0    # the kit size the per-drum gains were written for
+MIN_KIT_TRIM = 0.45
 VARIANTS = 3           # one-shot variants per voice, cycled so repeats still vary
 DUCK_DEPTH = 0.42
 DUCK_RELEASE = 0.055
 
 ProgressFn = Optional[Callable[[float, str], None]]
+
+
+def survey(composition: Composition, sample_rate: int = SAMPLE_RATE) -> balance.Mix:
+    """Ask every voice what it sounds like, and decide who needs room.
+
+    One representative note per voice, through its own effects chain, weighted
+    by how much that voice actually plays. Cheap — a handful of notes — and it
+    is the only way to know that this pad is under a noise wash rather than
+    under a sub bass, which is the difference between present and inaudible.
+    """
+    specs = {voice.voice_id: voice for voice in composition.voices}
+    played: dict[str, float] = {}
+    for note in composition.notes:
+        played[note.voice] = played.get(note.voice, 0.0) + note.velocity * note.duration
+    for stroke in composition.strokes:
+        played[stroke.voice] = played.get(stroke.voice, 0.0) + stroke.velocity * 0.25
+
+    pitched = [n for n in composition.notes]
+    middle: dict[str, float] = {}
+    for note in pitched:
+        middle.setdefault(note.voice, note.pitch)
+
+    kit_size = sum(1 for v in composition.voices if v.role == ROLE_PERC)
+    trim = kit_trim(kit_size)
+
+    energies: dict[str, tuple[str, tuple[float, ...], float]] = {}
+    for voice_id, weight in played.items():
+        spec = specs.get(voice_id)
+        if spec is None or weight <= 0:
+            continue
+        if spec.role == ROLE_PERC:
+            sample = drums.render_drum(spec, sample_rate, composition.seed, 0)
+            gain = spec.gain * trim
+        else:
+            count = int(sample_rate * 1.2)
+            sample = engines.render_note(spec, _hz(middle.get(voice_id, 60.0)),
+                                         count, sample_rate, composition.seed, 0)
+            if spec.effects:
+                sample = effects.apply_chain(sample, sample_rate, spec.effects)
+            gain = spec.gain
+        bands = balance.band_energy(sample, sample_rate)
+        scale = weight * gain * gain
+        energies[voice_id] = (spec.role, tuple(value * scale for value in bands), gain)
+
+    return balance.weigh(energies, played)
 
 
 def render_composition(composition: Composition, master_gain: float = 0.89,
@@ -43,25 +90,28 @@ def render_composition(composition: Composition, master_gain: float = 0.89,
     melodic = np.zeros(total, dtype=np.float64)
     percussion = np.zeros(total, dtype=np.float64)
 
-    _render_voices(melodic, composition, seconds_per_beat, progress)
+    _report(progress, 0.03, "listening to each voice")
+    mix = survey(composition)
+
+    _render_voices(melodic, composition, seconds_per_beat, progress, mix.trims())
 
     _report(progress, 0.80, f"placing {len(composition.strokes)} strokes")
-    _render_strokes(percussion, composition, seconds_per_beat)
+    _render_strokes(percussion, composition, seconds_per_beat, mix.trims())
 
     _report(progress, 0.90, "ducking against the kick")
     melodic *= _sidechain(total, composition, seconds_per_beat)
 
     _report(progress, 0.95, "mastering")
-    mix = filters.highpass(melodic + percussion, SAMPLE_RATE, 24.0)
-    mix = fx.peak_normalise(mix, 0.97) * master_gain
-    mix = fx.fade_edges(fx.limit(mix), SAMPLE_RATE, 0.02)
+    master = filters.highpass(melodic + percussion, SAMPLE_RATE, 24.0)
+    master = fx.peak_normalise(master, 0.97) * master_gain
+    master = fx.fade_edges(fx.limit(master), SAMPLE_RATE, 0.02)
 
     _report(progress, 1.0, "done")
-    return mix
+    return master
 
 
 def _render_voices(bus: np.ndarray, composition: Composition, seconds_per_beat: float,
-                   progress: ProgressFn) -> None:
+                   progress: ProgressFn, trims: dict[str, float] | None = None) -> None:
     """One voice at a time: synthesise its notes, run its effects, fold it in."""
     specs = {voice.voice_id: voice for voice in composition.voices}
     grouped: dict[str, list] = {}
@@ -94,12 +144,27 @@ def _render_voices(bus: np.ndarray, composition: Composition, seconds_per_beat: 
 
         if spec.effects:
             scratch = effects.apply_chain(scratch, SAMPLE_RATE, spec.effects)
-        bus += scratch * spec.gain
+        bus += scratch * spec.gain * (trims or {}).get(voice_id, 1.0)
+
+
+def kit_trim(count: int) -> float:
+    """How much to hold the kit back for having this many drums in it.
+
+    Seven drums should not be seven times one drum. Each voice was given a
+    gain as if it were playing alone, so a dense kit arrived at roughly twice
+    the level of everything melodic put together — measured, not guessed.
+    Square root rather than linear because that is roughly how loudness adds
+    when the hits are not simultaneous.
+    """
+    if count <= 0:
+        return 1.0
+    return max(MIN_KIT_TRIM, min(1.0, (REFERENCE_KIT / count) ** 0.5))
 
 
 def _render_strokes(bus: np.ndarray, composition: Composition,
-                    seconds_per_beat: float) -> None:
+                    seconds_per_beat: float, trims: dict[str, float] | None = None) -> None:
     kit = {voice.voice_id: voice for voice in composition.voices if voice.role == ROLE_PERC}
+    trim = kit_trim(len(kit))
     cache: dict[tuple[str, int], np.ndarray] = {}
 
     for position, stroke in enumerate(composition.strokes):
@@ -112,7 +177,8 @@ def _render_strokes(bus: np.ndarray, composition: Composition,
         if sample is None:
             sample = drums.render_drum(spec, SAMPLE_RATE, composition.seed, variant)
             cache[key] = sample
-        _add_at(bus, sample * stroke.velocity * spec.gain,
+        _add_at(bus, sample * stroke.velocity * spec.gain * trim
+                * (trims or {}).get(stroke.voice, 1.0),
                 _sample_at(stroke.start, seconds_per_beat))
 
 

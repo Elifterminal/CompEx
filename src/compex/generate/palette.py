@@ -108,6 +108,18 @@ LFO_RATES: tuple[float, ...] = (0.125, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0,
 CANDIDATE_POOL = 4  # how many near-matching engines go into the hat
 
 
+def airiness(mood: Mood) -> float:
+    """How much breath, air and noise this mood should carry, 0..1.
+
+    Breath is a mix decision wearing a synthesis parameter's clothes, and it
+    was the one place left in the palette drawing blind. Air is the first thing
+    that muddies a crowded arrangement, so a dense piece gets less of it than a
+    sparse one however bright it is.
+    """
+    open_space = 1.0 - 0.75 * mood.density
+    return max(0.0, min(1.0, (0.25 + 0.55 * mood.valence) * open_space + 0.12 * mood.grit))
+
+
 @dataclass(frozen=True)
 class VoiceSpec:
     """One instrument: engine, role, invented parameters, and its effects chain."""
@@ -371,9 +383,10 @@ def _formant(seed, stream, mood):
 
 
 def _reed(seed, stream, mood):
+    air = airiness(mood)
     return (("width", rng.between(seed, f"{stream}-w", 0, 0.12, 0.5)),
             ("pwm", rng.between(seed, f"{stream}-pwm", 0, 0.3, 4.0)),
-            ("breath", rng.between(seed, f"{stream}-br", 0, 0.03, 0.3)),
+            ("breath", 0.02 + air * 0.16 + rng.between(seed, f"{stream}-br", 0, 0.0, 0.05)),
             ("attack", rng.between(seed, f"{stream}-att", 0, 0.01, 0.14)),
             ("release", rng.between(seed, f"{stream}-rel", 0, 0.05, 0.4)))
 
@@ -391,16 +404,20 @@ def _choir(seed, stream, mood):
     return (("f1", vowel[0]), ("f2", vowel[1]),
             ("singers", float(3 + int(rng.uniform(seed, f"{stream}-n", 0) * 4))),
             ("spread", rng.between(seed, f"{stream}-sp", 0, 0.002, 0.014)),
-            ("air", rng.between(seed, f"{stream}-air", 0, 0.02, 0.2)),
+            ("air", 0.02 + airiness(mood) * 0.13),
             ("q", rng.between(seed, f"{stream}-q", 0, 5.0, 12.0)),
             ("attack", rng.between(seed, f"{stream}-att", 0, 0.1, 0.7)),
             ("release", rng.between(seed, f"{stream}-rel", 0, 0.2, 1.0)))
 
 
 def _flute(seed, stream, mood):
+    # The flute is mostly air by design — "the noise is most of what you
+    # recognise" — so this is the parameter that decides whether a lead reads
+    # as a flute or as somebody breathing into the microphone.
+    air = airiness(mood)
     return (("vibrato", rng.between(seed, f"{stream}-vib", 0, 0.001, 0.009)),
             ("rate", rng.between(seed, f"{stream}-rate", 0, 3.5, 6.5)),
-            ("breath", rng.between(seed, f"{stream}-br", 0, 0.1, 0.55)),
+            ("breath", 0.07 + air * 0.26 + rng.between(seed, f"{stream}-br", 0, 0.0, 0.06)),
             ("attack", rng.between(seed, f"{stream}-att", 0, 0.03, 0.25)),
             ("release", rng.between(seed, f"{stream}-rel", 0, 0.08, 0.4)))
 

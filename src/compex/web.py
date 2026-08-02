@@ -17,6 +17,7 @@ import json
 import numpy as np
 
 from compex import __version__, report
+from compex.dsp.arrange import survey
 from compex.dsp.stream import DEFAULT_SPAN_SECONDS, Level, finish, plan, render_span
 from compex.generate import THEMES, compose
 from compex.generate.mood import AXES, Mood, theme_names
@@ -33,6 +34,10 @@ class Session:
                  master_gain: float = 0.89) -> None:
         self.composition = compose(int(seed), float(duration_s), Mood.parse(mood))
         self.spans = plan(self.composition, float(span_seconds))
+        # Once for the piece, not once per span: the balance is a property of
+        # the whole thing, and recomputing it mid-stream would make the mix
+        # drift between the start of a track and the end of it.
+        self.mix = survey(self.composition)
         self.master_gain = float(master_gain)
         self._carry: np.ndarray | None = None
         self._level: Level | None = None
@@ -68,6 +73,7 @@ class Session:
             "patterns": report.patterns(self.composition),
             "taste": report.taste(self.composition),
             "ledger": report.ledger(self.composition),
+            "mix": report.mix(self.mix),
             "hindsight": report.hindsight(self.composition),
         }
 
@@ -90,7 +96,8 @@ class Session:
             return None
         span = self.spans[self._position]
         samples, self._carry, self._level = render_span(
-            self.composition, span, self._carry, self.master_gain, self._level)
+            self.composition, span, self._carry, self.master_gain, self._level,
+            self.mix.trims())
         self._position += 1
         return {
             "index": span.index,
