@@ -12,6 +12,12 @@ it is doing plainly is not working. When most principles are satisfied it
 settles down and stops fiddling. That makes this a second-order system: the
 state evolves, and the rule that updates the state evolves under it.
 
+The bounds move as well. A drive parked against its ceiling while the same
+complaint keeps arriving is a sign the ceiling was a guess, not a law — so
+**strain** accumulates and the bound gives way, a little, up to a hard safety
+limit that is about what stays musical rather than what was expected. The
+starting bounds are where the composer begins, not where it has to stay.
+
 Every change is recorded with the principle that caused it, so the piece can
 explain itself afterwards rather than just being different.
 """
@@ -47,6 +53,7 @@ SENSITIVITY: dict[str, float] = {
     "motif_recall": 0.40,
 }
 
+#: Where a drive starts out allowed to go. Under sustained strain these give.
 BOUNDS: dict[str, tuple[float, float]] = {
     "novelty_pressure": (0.05, 1.0),
     "gap_fill": (0.0, 1.0),
@@ -57,10 +64,28 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "motif_recall": (0.0, 1.0),
 }
 
+#: Where a drive can never go, however hard the music pushes. These are the
+#: places the mechanism stops making sense — a register reach past two octaves
+#: stops reading as one instrument, a density bias past 3 is a wall of hits.
+HARD_BOUNDS: dict[str, tuple[float, float]] = {
+    "novelty_pressure": (0.02, 1.60),
+    "gap_fill": (0.0, 1.0),
+    "register_pull": (0.0, 1.0),
+    "register_reach": (0.05, 1.75),
+    "dissonance_ceiling": (0.02, 1.35),
+    "density_bias": (0.20, 3.00),
+    "motif_recall": (0.0, 1.0),
+}
+
 PLASTICITY_BOUNDS = (0.15, 1.40)
 UNREST_MEMORY = 0.6        # how much of the running unrest survives each movement
 SETTLED = 0.22             # unrest below this and the composer stops pushing so hard
 FATIGUE_DECAY = 0.65       # how fast a recently-used transform becomes usable again
+
+BOUND_YIELD = 0.55         # how far a bound gives per unit of strain past the threshold. 0 pins it
+STRAIN_ONSET = 0.35        # strain below this and the bound holds
+STRAIN_DECAY = 0.55        # how much strain survives a movement where the drive was not pinned
+MAX_GIVE = 0.85            # a bound never gives by more than this share of its own span
 
 
 @dataclass(frozen=True)
@@ -78,6 +103,23 @@ class Drives:
     plasticity: float = 0.50
     unrest: float = 0.00
     fatigue: tuple[tuple[str, float], ...] = ()
+    strain: tuple[tuple[str, float], ...] = ()
+
+    def strain_on(self, drive: str) -> float:
+        """How long this drive has been shoving against its own bound."""
+        for name, level in self.strain:
+            if name == drive:
+                return level
+        return 0.0
+
+    def beyond_start(self) -> tuple[str, ...]:
+        """Drives that have left the range they were originally allowed."""
+        out = []
+        for name, (low, high) in BOUNDS.items():
+            value = getattr(self, name)
+            if value > high + 1e-6 or value < low - 1e-6:
+                out.append(name)
+        return tuple(out)
 
     def tired_of(self, kind: str) -> float:
         for name, level in self.fatigue:
@@ -95,15 +137,21 @@ class Drives:
         )))
 
     def summary(self) -> str:
-        return (f"novelty {self.novelty_pressure:.2f} · gap-fill {self.gap_fill:.2f} · "
+        line = (f"novelty {self.novelty_pressure:.2f} · gap-fill {self.gap_fill:.2f} · "
                 f"pull {self.register_pull:.2f} · reach {self.register_reach:.2f} · "
                 f"dissonance {self.dissonance_ceiling:.2f} · density {self.density_bias:.2f} · "
                 f"recall {self.motif_recall:.2f} · plasticity {self.plasticity:.2f}")
+        past = self.beyond_start()
+        return line + (f" · past its starting range: {', '.join(past)}" if past else "")
 
 
 @dataclass(frozen=True)
 class Adjustment:
-    """One drive moved, and the principle that moved it."""
+    """One drive moved, and the principle that moved it.
+
+    ``kind`` is "drive" for an ordinary correction and "bound" for the rarer
+    thing: a limit giving way because the correction kept hitting it.
+    """
 
     drive: str
     before: float
@@ -111,6 +159,7 @@ class Adjustment:
     principle: str
     attribution: str
     measured: float
+    kind: str = "drive"
 
     @property
     def delta(self) -> float:
@@ -118,6 +167,10 @@ class Adjustment:
 
     def describe(self) -> str:
         arrow = "up" if self.delta > 0 else "down"
+        if self.kind == "bound":
+            return (f"{self.drive} broke its own limit {self.before:.2f}→{self.after:.2f} "
+                    f"({self.principle} would not stop reading {self.measured:.2f}) "
+                    f"— {self.attribution}")
         return (f"{self.drive} {arrow} {abs(self.delta):.3f} "
                 f"({self.principle} read {self.measured:.2f}) — {self.attribution}")
 
@@ -168,8 +221,14 @@ def initial_drives(mood: Mood, root_pitch: int) -> Drives:
 
 def respond(drives: Drives, verdicts: tuple[Verdict, ...],
             analysis: Analysis) -> tuple[Drives, tuple[Adjustment, ...]]:
-    """Move the drives toward satisfying the critic, then move the plasticity."""
+    """Move the drives toward satisfying the critic, then move the plasticity.
+
+    A drive that is already jammed against its bound and is *still* being asked
+    for more accumulates strain, and once there is enough of it the bound gives.
+    That is the difference between a starting weight and a rule.
+    """
     values = {name: getattr(drives, name) for name in SENSITIVITY}
+    strain = {name: level * STRAIN_DECAY for name, level in drives.strain}
     adjustments: list[Adjustment] = []
 
     for verdict in verdicts:
@@ -183,23 +242,60 @@ def respond(drives: Drives, verdicts: tuple[Verdict, ...],
         delta = polarity * (-verdict.error) * SENSITIVITY[drive] * drives.plasticity
 
         before = values[drive]
-        low, high = BOUNDS[drive]
+        start_low, start_high = BOUNDS[drive]
+        pinned = ((delta > 0 and before >= start_high - 1e-6)
+                  or (delta < 0 and before <= start_low + 1e-6))
+        if pinned:
+            # Undo the decay for this drive and add to it: the complaint came back.
+            strain[drive] = strain.get(drive, 0.0) / STRAIN_DECAY + abs(verdict.error)
+
+        low, high = bounds_for(drive, strain.get(drive, 0.0))
         after = max(low, min(high, before + delta))
         if abs(after - before) < 1e-4:
             continue
 
         values[drive] = after
-        adjustments.append(Adjustment(
-            drive=drive, before=before, after=after,
-            principle=verdict.principle.name,
-            attribution=verdict.principle.attribution,
-            measured=verdict.measured,
-        ))
+        if after > start_high + 1e-6 or after < start_low - 1e-6:
+            # Only worth reporting once the value is genuinely outside where it
+            # was allowed to start. A bound that widened but was never used is
+            # not a decision the piece made.
+            adjustments.append(Adjustment(
+                drive=drive,
+                before=start_high if after > start_high else start_low,
+                after=after,
+                principle=verdict.principle.name,
+                attribution=verdict.principle.attribution,
+                measured=verdict.measured,
+                kind="bound",
+            ))
+        else:
+            adjustments.append(Adjustment(
+                drive=drive, before=before, after=after,
+                principle=verdict.principle.name,
+                attribution=verdict.principle.attribution,
+                measured=verdict.measured,
+            ))
 
-    updated = replace(drives, **values)
+    updated = replace(drives, **values, strain=tuple(sorted(
+        (name, level) for name, level in strain.items() if level > 0.02)))
     updated = _shift_centre(updated, analysis)
     updated = _reconsider(updated, verdicts)
     return updated, tuple(adjustments)
+
+
+def bounds_for(drive: str, strain: float) -> tuple[float, float]:
+    """The bounds this drive is working under, given how hard it has been pushing.
+
+    Below the onset the starting bounds hold exactly. Past it they widen in
+    proportion to the strain, and stop at the hard limits — the ones that are
+    about the mechanism still making sound rather than about expectation.
+    """
+    low, high = BOUNDS[drive]
+    if strain <= STRAIN_ONSET or BOUND_YIELD <= 0.0:
+        return low, high
+    give = min(MAX_GIVE, (strain - STRAIN_ONSET) * BOUND_YIELD) * (high - low)
+    hard_low, hard_high = HARD_BOUNDS[drive]
+    return max(hard_low, low - give), min(hard_high, high + give)
 
 
 def _shift_centre(drives: Drives, analysis: Analysis) -> Drives:

@@ -178,6 +178,73 @@ function drawEvolution(steps) {
   }).join("");
 }
 
+/* ---------- what it chose ---------- */
+
+function drawChoices(data) {
+  const patterns = data.patterns || [];
+  const taste = data.taste;
+  if (!patterns.length && !taste) {
+    $("choice-panel").hidden = true;
+    return;
+  }
+  $("choice-panel").hidden = false;
+  $("choice-note").textContent = taste
+    ? `${taste.chosen} phrases kept out of ${taste.auditioned} imagined · ` +
+      `${taste.generations} generations deep`
+    : "";
+
+  $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
+  drawMelody(data.melody || []);
+}
+
+function drawFigure(pattern) {
+  // Two rows on the same grid: what it plays, and what it now believes about
+  // where hits belong. Seeing them together is the point — the second row is
+  // what the first row taught it.
+  const cells = pattern.slots.map((velocity, index) => {
+    const weight = pattern.weights[index] || 0;
+    const learned = weight > 1 ? " learned" : "";
+    const level = velocity > 0.66 ? " hard" : velocity > 0 ? " soft" : "";
+    return `<i class="cell${level}${learned}"
+              title="slot ${index} · weight ${weight} (was ${pattern.start_weights[index]})"></i>`;
+  }).join("");
+  const moved = pattern.past_start
+    ? `<span class="chip learned">${pattern.past_start} slot${pattern.past_start > 1 ? "s" : ""}
+        heavier than the meter made them</span>`
+    : "";
+  return `<div class="figure">
+    <div class="figure-head"><code>${pattern.voice}</code>
+      <span class="note">${pattern.hits} hits · ${pattern.subdivision} beat per slot ·
+        revised ${pattern.revisions}&times;</span></div>
+    <div class="cells">${cells}</div>
+    <div class="figure-foot">${moved}</div>
+  </div>`;
+}
+
+function drawWeight(criterion) {
+  const width = Math.min(100, (criterion.now / 3.2) * 100);
+  const from = Math.min(100, (criterion.start / 3.2) * 100);
+  return `<div class="weight${criterion.moved ? " moved" : ""}">
+    <span class="wname">${criterion.name}</span>
+    <span class="wbar"><i style="width:${width}%"></i><b style="left:${from}%"></b></span>
+    <span class="wval">${criterion.now}${criterion.moved ? " <em>moved</em>" : ""}</span>
+  </div>`;
+}
+
+function drawMelody(choices) {
+  $("melody-details").hidden = choices.length === 0;
+  $("melody").innerHTML = choices.map((choice) => {
+    const beaten = choice.beat.map((other) => `${other.origin} ${other.score}`).join(", ");
+    return `<div class="audition">
+      <code>${choice.origin}</code>
+      <span class="note">${choice.at}s · gen ${choice.generation} ·
+        won by ${choice.margin} over ${choice.considered - 1}</span>
+      <div class="note">${beaten || "nothing else on the table"}</div>
+    </div>`;
+  }).join("");
+}
+
 /* ---------- actions ---------- */
 
 function setStatus(text, kind) {
@@ -227,6 +294,7 @@ async function makeTrack() {
     $("dl-formula").setAttribute("download", data.formula_file);
 
     drawEvolution(data.evolution);
+    drawChoices(data);
     setDelivery(true, data);
     drawWave(data.peaks, data.movements, data.duration);
     drawMarks(data.movements, data.duration);

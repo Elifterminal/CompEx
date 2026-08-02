@@ -16,7 +16,7 @@ import json
 
 import numpy as np
 
-from compex import __version__
+from compex import __version__, report
 from compex.dsp.stream import DEFAULT_SPAN_SECONDS, Level, finish, plan, render_span
 from compex.generate import THEMES, compose
 from compex.generate.mood import AXES, Mood, theme_names
@@ -62,41 +62,16 @@ class Session:
                 for v in piece.voices if v.role != "perc"
             ],
             "kit": [v.voice_id for v in piece.voices if v.role == "perc"],
-            "movements": self._movements(),
+            "movements": report.movements(self.composition),
             "evolution": self.evolution(),
+            "melody": report.melody(self.composition),
+            "patterns": report.patterns(self.composition),
+            "taste": report.taste(self.composition),
         }
-
-    def _movements(self) -> list[dict]:
-        out, cursor = [], 0.0
-        spb = self.composition.seconds_per_beat
-        for movement in self.composition.movements:
-            out.append({
-                "name": movement.name,
-                "start": round(cursor * spb, 2),
-                "end": round((cursor + movement.beats) * spb, 2),
-                "energy": round(movement.energy, 3),
-            })
-            cursor += movement.beats
-        return out
 
     def evolution(self) -> list[dict]:
         """Where the composer listened back and changed its mind."""
-        spb = self.composition.seconds_per_beat
-        return [{
-            "movement": step.movement,
-            "name": step.movement_name,
-            "at": round(step.at_beat * spb, 2),
-            "heard": [{"principle": v.principle.name,
-                       "measured": round(v.measured, 3),
-                       "attribution": v.principle.attribution}
-                      for v in step.unhappy],
-            "did": [{"drive": a.drive, "before": round(a.before, 3),
-                     "after": round(a.after, 3), "because": a.principle}
-                    for a in step.adjustments],
-            "note": step.note(),
-            "plasticity": round(step.after.plasticity, 3),
-            "unrest": round(step.after.unrest, 3),
-        } for step in self.composition.evolution]
+        return report.evolution(self.composition)
 
     def formula(self) -> str:
         return emit(self.composition, self.composition.total_seconds)

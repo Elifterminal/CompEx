@@ -19,11 +19,10 @@ from urllib.parse import unquote, urlparse
 
 import numpy as np
 
-from compex import __version__
+from compex import __version__, report
 from compex.audio import encode
 from compex.config import OUTPUT_DIR, KnobError, Knobs
 from compex.delivery import DEFAULT_RECIPIENT, DeliveryError, send_render
-from compex.generate.compose import Composition
 from compex.generate.mood import AXES, THEMES, Mood, MoodError, theme_names
 from compex.pipeline import make_track
 
@@ -122,8 +121,11 @@ class CompexHandler(BaseHTTPRequestHandler):
             "summary": result.composition.summary(),
             "theme": mood.nearest_theme(),
             "peaks": _waveform(result.samples),
-            "movements": _movements(result.composition),
-            "evolution": _evolution(result.composition),
+            "movements": report.movements(result.composition),
+            "evolution": report.evolution(result.composition),
+            "melody": report.melody(result.composition),
+            "patterns": report.patterns(result.composition),
+            "taste": report.taste(result.composition),
         }
 
     def _email(self, payload: dict) -> dict:
@@ -213,43 +215,6 @@ def _waveform(samples: np.ndarray, points: int = WAVEFORM_POINTS) -> list[float]
     usable = (len(samples) // bucket) * bucket
     folded = np.abs(samples[:usable]).reshape(-1, bucket).max(axis=1)
     return [round(float(value), 4) for value in folded]
-
-
-def _movements(composition: Composition) -> list[dict]:
-    """Movement boundaries in seconds, so the waveform can be annotated."""
-    out: list[dict] = []
-    cursor = 0.0
-    seconds_per_beat = composition.seconds_per_beat
-    for movement in composition.movements:
-        out.append({
-            "name": movement.name,
-            "energy": round(movement.energy, 3),
-            "start": round(cursor * seconds_per_beat, 3),
-            "end": round((cursor + movement.beats) * seconds_per_beat, 3),
-        })
-        cursor += movement.beats
-    return out
-
-
-def _evolution(composition: Composition) -> list[dict]:
-    """Where the composer listened back and changed its mind."""
-    return [{
-        "movement": step.movement,
-        "name": step.movement_name,
-        "at": round(step.at_beat, 2),
-        "heard": [{"principle": v.principle.name,
-                   "measured": round(v.measured, 3),
-                   "attribution": v.principle.attribution}
-                  for v in step.unhappy],
-        "did": [{"drive": a.drive,
-                 "before": round(a.before, 3),
-                 "after": round(a.after, 3),
-                 "because": a.principle}
-                for a in step.adjustments],
-        "note": step.note(),
-        "plasticity": round(step.after.plasticity, 3),
-        "unrest": round(step.after.unrest, 3),
-    } for step in composition.evolution]
 
 
 def _bind(preferred: int) -> ThreadingHTTPServer:

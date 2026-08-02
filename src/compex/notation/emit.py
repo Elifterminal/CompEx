@@ -27,8 +27,9 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         _harmony(composition),
         _motif(composition),
         _form(composition),
-        *_combs(composition),
+        *_patterns(composition),
         *_voices(composition),
+        *_melody(composition),
         *_evolution(composition),
     ]
     return "\n\n".join(block for block in blocks if block)
@@ -90,13 +91,19 @@ def _form(composition: Composition) -> str:
     return f"\\mathrm{{FORM}}_{{\\mathrm{{{composition.archetype}}}}}={chain}"
 
 
-def _combs(composition: Composition) -> list[str]:
+def _patterns(composition: Composition) -> list[str]:
+    """The rhythm each voice settled on, as the grid it actually plays.
+
+    A pattern is written as its slot vector rather than as a comb, because it
+    is no longer a period — it is a decision, one slot at a time, and half of
+    it would be lost by describing it as a pulse with an offset.
+    """
     lines: list[str] = []
-    for comb in composition.combs:
-        period = f"{comb.period_beats:g}n"
-        inner = period if not comb.offset_beats else f"({period}+{comb.offset_beats:g})"
+    for figure in composition.final_patterns():
+        cells = ",".join(f"{value:g}" for value in figure.slots)
         lines.append(
-            f"K_{{\\mathrm{{{comb.name}}}}}(t)=\\sum_{{n}}\\delta(t-{inner})"
+            f"P_{{\\mathrm{{{figure.voice}}}}}=\\left[{cells}\\right]"
+            f"_{{\\Delta={figure.subdivision:g}}}"
         )
     return lines
 
@@ -120,6 +127,54 @@ def _voices(composition: Composition) -> list[str]:
     return lines
 
 
+def _melody(composition: Composition) -> list[str]:
+    """The auditions: how many lines were imagined, which won, what it listens for.
+
+    Like the evolution block, none of this can be reconstructed from the lines
+    above it. The chosen phrase is in the notes; the four it beat are not, and
+    without them the piece reads as if it had never had a choice.
+    """
+    if not composition.melodies:
+        return []
+
+    imagined = sum(choice.considered for choice in composition.melodies)
+    deepest = max(choice.chosen.generation for choice in composition.melodies)
+    lines = [
+        "\\mathrm{MELODY}:\\ "
+        f"{len(composition.melodies)}\\mathrm{{\\ chosen\\ from\\ }}{imagined}"
+        f"\\mathrm{{\\ imagined}},\\ {deepest}\\mathrm{{\\ generations}}"
+    ]
+
+    for choice in composition.melodies:
+        steps = ",".join(f"{step:+d}" if step else "0" for step in choice.chosen.steps)
+        beaten = ",\\ ".join(f"\\mathrm{{{origin}}}\\,{score:.2f}"
+                             for origin, score in choice.rejected) or "\\mathrm{-}"
+        lines.append(
+            f"\\Lambda_{{{choice.movement}}}@{choice.at_beat:g}="
+            f"\\left\\{{{steps}\\right\\}}_{{\\mathrm{{{choice.chosen.origin}}}}}"
+            f"\\,{choice.score:.3f}\\ \\mathrm{{over}}\\ {beaten}"
+        )
+
+    taste = composition.taste
+    strayed = taste.strayed_from(composition.opening_taste)
+    lines.append(
+        "\\Psi_{\\mathrm{taste}}=\\left("
+        + ",\\ ".join(f"\\mathrm{{{name}}}={value:.2f}" for name, value in taste.weights())
+        + "\\right)"
+        + (f"\\quad\\mathrm{{moved}}:\\ \\mathrm{{{', '.join(strayed)}}}" if strayed else "")
+    )
+
+    moved = [grid for grid in composition.grids if grid.past_start()]
+    if moved:
+        lines.append(
+            "\\mathrm{GRIDS\\ past\\ their\\ starting\\ weights}:\\ "
+            + ",\\ ".join(f"\\mathrm{{{grid.voice}}}({grid.past_start()}"
+                          f"\\mathrm{{\\ slots}},\\ \\bar\\Delta{grid.strayed():.2f})"
+                          for grid in moved)
+        )
+    return lines
+
+
 def _evolution(composition: Composition) -> list[str]:
     """Write out where the piece changed its mind, and what made it.
 
@@ -138,8 +193,11 @@ def _evolution(composition: Composition) -> list[str]:
         heard = ",\\ ".join(
             f"\\mathrm{{{v.principle.name}}}={v.measured:.2f}" for v in step.unhappy
         ) or "\\mathrm{all\\ satisfied}"
+        # A starred move is one that went past the bound the drive started with —
+        # the composer deciding the limit was a guess rather than a rule.
         did = ",\\ ".join(
             f"\\mathrm{{{a.drive}}}\\,{a.before:.2f}\\!\\rightarrow\\!{a.after:.2f}"
+            + ("^{\\ast}" if a.kind == "bound" else "")
             for a in step.adjustments
         ) or "\\mathrm{held}"
         lines.append(

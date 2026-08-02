@@ -11,9 +11,11 @@ from compex.generate import THEMES, compose
 from compex.generate.critic import PRINCIPLES, Analysis, analyse, judge
 from compex.generate.evolve import (
     BOUNDS,
+    HARD_BOUNDS,
     POLARITY,
     SENSITIVITY,
     Drives,
+    bounds_for,
     initial_drives,
     respond,
 )
@@ -87,15 +89,52 @@ class CriticTests(unittest.TestCase):
 
 
 class DecidingTests(unittest.TestCase):
-    def test_drives_stay_inside_their_bounds_under_extreme_complaints(self):
+    def test_drives_never_pass_the_hard_limits(self):
+        """The starting bounds give. These do not — past them nothing is musical."""
         drives = initial_drives(THEMES["frantic"], 48)
         analysis = Analysis(200, 100, 1.0, 0.0, 0.0, 40.0, 1.0, 1.0, 1.4, 0.0)
         for _ in range(40):
             drives, _ = respond(drives, judge(analysis, THEMES["frantic"]), analysis)
-        for name, (low, high) in BOUNDS.items():
+        for name, (low, high) in HARD_BOUNDS.items():
             value = getattr(drives, name)
             self.assertGreaterEqual(value, low, name)
             self.assertLessEqual(value, high, name)
+
+    def test_a_bound_holds_until_the_complaint_will_not_go_away(self):
+        """One bad movement is not evidence the limit was wrong."""
+        self.assertEqual(bounds_for("novelty_pressure", 0.0), BOUNDS["novelty_pressure"])
+        self.assertEqual(bounds_for("novelty_pressure", 0.3), BOUNDS["novelty_pressure"])
+        widened = bounds_for("novelty_pressure", 3.0)
+        self.assertGreater(widened[1], BOUNDS["novelty_pressure"][1])
+        self.assertLessEqual(widened[1], HARD_BOUNDS["novelty_pressure"][1])
+
+    def test_sustained_pressure_pushes_a_drive_past_where_it_started(self):
+        drives = initial_drives(THEMES["serene"], 48)
+        awful = Analysis(200, 100, 1.0, 0.0, 0.0, 30.0, 1.0, 1.0, 1.4, 0.0)
+        for _ in range(12):
+            drives, _ = respond(drives, judge(awful, THEMES["serene"]), awful)
+        self.assertTrue(drives.beyond_start(),
+                        f"nothing broke its bound under 12 rounds of the same complaint: "
+                        f"{drives.summary()}")
+
+    def test_the_yield_is_a_switch_that_can_be_turned_off(self):
+        from unittest.mock import patch
+
+        drives = initial_drives(THEMES["serene"], 48)
+        awful = Analysis(200, 100, 1.0, 0.0, 0.0, 30.0, 1.0, 1.0, 1.4, 0.0)
+        with patch("compex.generate.evolve.BOUND_YIELD", 0.0):
+            for _ in range(12):
+                drives, _ = respond(drives, judge(awful, THEMES["serene"]), awful)
+        self.assertEqual(drives.beyond_start(), ())
+
+    def test_a_broken_bound_is_reported_as_one(self):
+        drives = initial_drives(THEMES["serene"], 48)
+        awful = Analysis(200, 100, 1.0, 0.0, 0.0, 30.0, 1.0, 1.0, 1.4, 0.0)
+        kinds = set()
+        for _ in range(12):
+            drives, adjustments = respond(drives, judge(awful, THEMES["serene"]), awful)
+            kinds.update(a.kind for a in adjustments)
+        self.assertIn("bound", kinds)
 
     def test_satisfied_music_settles_the_composer_down(self):
         drives = initial_drives(THEMES["serene"], 48)

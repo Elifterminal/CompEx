@@ -34,7 +34,10 @@ from compex.dsp.engines import ENGINE_NAMES                       # noqa: E402
 from compex.dsp.engines import core, struck, sustained, textural, voiced  # noqa: E402
 from compex.generate import THEMES, compose                       # noqa: E402
 from compex.generate.critic import PRINCIPLES                     # noqa: E402
+from compex.generate.melody import CRITERIA_DETAIL as MELODY_CRITERIA  # noqa: E402
+from compex.generate.melody import MUTATIONS                      # noqa: E402
 from compex.generate.mood import AXES                             # noqa: E402
+from compex.generate.pattern import CRITERIA_DETAIL as GROOVE_CRITERIA  # noqa: E402
 from compex.generate.palette import (                             # noqa: E402
     DRUM_COLOUR,
     ENGINE_COLOUR,
@@ -106,6 +109,40 @@ def evolution_survey() -> dict:
             "corrections": sum(len(s.adjustments) for s in piece.evolution),
         }
     return out
+
+
+CHOICE_THEMES = ("serene", "hypnotic", "melancholy", "menacing", "frantic")
+CHOICE_SECONDS = 240.0
+
+
+def choice_survey() -> dict:
+    """Long pieces again, this time measuring what the auditions actually did.
+
+    Everything the choosing panel claims is counted here from real pieces. If
+    the composer stopped auditioning, or every audition were won by the same
+    kind of candidate, this measurement would say so on the page rather than
+    the page quietly continuing to describe an earlier version.
+    """
+    pieces = [compose(7788, CHOICE_SECONDS, THEMES[name]) for name in CHOICE_THEMES]
+    melodies = [choice for piece in pieces for choice in piece.melodies]
+    grids = [grid for piece in pieces for grid in piece.grids]
+
+    return {
+        "pieces": pieces,
+        "example": pieces[CHOICE_THEMES.index("menacing")],
+        "chosen": len(melodies),
+        "imagined": sum(choice.considered for choice in melodies),
+        "winners": Counter(choice.chosen.origin for choice in melodies),
+        "deepest": max((choice.chosen.generation for choice in melodies), default=0),
+        "margin": statistics.median([choice.margin for choice in melodies] or [0.0]),
+        "moved": Counter(
+            name for piece in pieces
+            for name in piece.taste.strayed_from(piece.opening_taste)
+        ),
+        "grids": len(grids),
+        "grids_past": sum(1 for grid in grids if grid.past_start()),
+        "stray": statistics.mean([grid.strayed() for grid in grids] or [0.0]),
+    }
 
 
 # ── svg helpers ────────────────────────────────────────────────────────────
@@ -402,6 +439,15 @@ footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--line);
  border:1px solid var(--line);color:var(--fg);margin:0 5px 5px 0;background:var(--panel)}
 .retract{border-left:3px solid var(--warn);padding:2px 0 2px 15px;margin:16px 0}
 .retract s{color:var(--mut)}
+.figure{margin:10px 0 14px}
+.figure .lab{color:var(--mut);font-size:12.5px;margin-bottom:4px}
+.cells{display:flex;gap:3px;flex-wrap:wrap}
+.cell{width:15px;height:21px;border-radius:3px;background:var(--code);
+ border:1px solid var(--line)}
+.cell.soft{background:color-mix(in srgb,var(--accent) 42%,transparent);
+ border-color:var(--accent)}
+.cell.hard{background:var(--accent);border-color:var(--accent)}
+.cell.learned{box-shadow:0 2px 0 var(--ok)}
 """
 
 JS = """
@@ -456,7 +502,9 @@ density, grit.</td></tr>
 rhythmic densities are legal. Every option offered is already idiomatic, so the composer never
 generates garbage and filters it.</td></tr>
 <tr><td><b>compose</b></td><td>It picks a tempo, a mode, a progression, a motif, a form
-archetype, a set of instruments, and writes every note and drum stroke.</td></tr>
+archetype and a set of instruments, then <b>auditions</b> every melodic phrase against several
+alternatives and every rhythm against the grid it has learned, and writes the winners out as
+notes and drum strokes.</td></tr>
 <tr><td><b>arrange</b></td><td>Each voice is synthesised on its own bus, run through the effects
 chain invented for it, ducked against the kick, and mixed.</td></tr>
 <tr><td><b>emit</b></td><td>The whole set of decisions is written back out as equation notation.</td></tr>
@@ -715,6 +763,127 @@ confidently corrects toward the wrong thing, and it would look identical in the 
 """
 
 
+def figure_html(piece, pattern) -> str:
+    """One pattern drawn on its own grid, with what the grid now believes under it."""
+    grid = next((g for g in piece.grids if g.voice == pattern.voice), None)
+    cells = "".join(
+        f'<i class="cell{" hard" if velocity > 0.66 else " soft" if velocity else ""}'
+        f'{" learned" if grid and grid.weights[index] > 1.0 else ""}"'
+        f' title="slot {index}'
+        + (f' · weight {grid.weights[index]:.2f} (started {grid.start[index]:.2f})"'
+           if grid else '"')
+        + "></i>"
+        for index, velocity in enumerate(pattern.slots)
+    )
+    learned = ""
+    if grid and grid.past_start():
+        learned = (f" &middot; <b>{grid.past_start()} slot(s) now heavier than the meter "
+                   f"made them</b>")
+    return (f'<div class="figure"><div class="lab"><code>{pattern.voice}</code> '
+            f'{pattern.hit_count} hits &middot; {pattern.subdivision:g} beat per slot'
+            f'{learned}</div><div class="cells">{cells}</div></div>')
+
+
+def panel_choose(choices) -> str:
+    piece = choices["example"]
+    melodic = "".join(
+        f"<tr><td><b>{c.name}</b></td><td class='sub'>{c.attribution}</td>"
+        f"<td class='sub'>{c.why}</td></tr>"
+        for c in MELODY_CRITERIA)
+    rhythmic = "".join(
+        f"<tr><td><b>{c.name}</b></td><td class='sub'>{c.why}</td></tr>"
+        for c in GROOVE_CRITERIA)
+    winners = "".join(
+        f"<tr><td><code>{origin}</code></td><td>{count}</td>"
+        f"<td class='sub'>{count / max(1, choices['chosen']) * 100:.0f}%</td></tr>"
+        for origin, count in choices["winners"].most_common(8))
+    moved = "".join(
+        f"<span class='chip'>{name} &times;{count}</span>"
+        for name, count in choices["moved"].most_common())
+    figures = "".join(figure_html(piece, figure) for figure in piece.final_patterns())
+
+    auditions = "".join(
+        f"<div class='read'><b>{choice.chosen.origin}</b> "
+        f"<span class='sub'>beat {choice.at_beat:g}, generation {choice.chosen.generation}</span>"
+        f"<br><span class='sub'>{choice.note()}</span></div>"
+        for choice in piece.melodies[:5])
+
+    return f"""
+<h2 style="margin-top:26px">Choosing, not reciting</h2>
+<p class="sub">Every phrase is auditioned against several alternatives, and every rhythm is a
+decision the composer keeps revising out of its own output. Measured over
+{len(CHOICE_THEMES)} pieces of {CHOICE_SECONDS:.0f} seconds.</p>
+
+<div class="grid">
+<div class="stat"><div class="n">{choices['imagined']}</div><div class="k">lines imagined</div></div>
+<div class="stat"><div class="n">{choices['chosen']}</div><div class="k">lines kept</div></div>
+<div class="stat"><div class="n">{choices['deepest']}</div><div class="k">deepest lineage</div></div>
+<div class="stat"><div class="n">{choices['margin']:.3f}</div><div class="k">median winning margin</div></div>
+<div class="stat"><div class="n">{choices['grids_past']}/{choices['grids']}</div>
+  <div class="k">grids past their starting weights</div></div>
+<div class="stat"><div class="n">{choices['stray']:.2f}</div><div class="k">mean weight travelled</div></div>
+</div>
+
+<div class="read"><b>The lead used to have no choice to make.</b> The germ motif came round,
+got rotated, and was spoken over whatever chord was underneath — a recital. Now the composer
+imagines several continuations, scores each one, and plays the winner. The winner becomes the
+parent of the next generation, so a phrase in the last movement descends from the first one by a
+chain of decisions, none of which were written down in advance.</div>
+
+<h3>What decides an audition</h3>
+<table><thead><tr><th>criterion</th><th>after</th><th>what it measures</th></tr></thead>
+<tbody>{melodic}</tbody></table>
+
+<div class="read"><b>The criteria are theory; the weights on them are not fixed.</b> They start
+from the mood, and then the critic teaches them — a principle that keeps failing makes the
+criterion that would have caught it matter more. A criterion that keeps separating winners from
+the field while the piece is going well earns a little weight on its own account. Nothing pulls
+them back toward where they started.</div>
+
+<p class="sub">Weights that left their starting band, counted across the sampled pieces:</p>
+<p>{moved or "<span class='sub'>none in this sample</span>"}</p>
+
+<h3>Where the candidates come from</h3>
+<p>A field is the germ, a return to it, some mutations of the line just played
+({', '.join(f'<code>{kind}</code>' for kind in MUTATIONS)}), and at least one line improvised
+from nothing. The outsider usually loses. It exists so that every phrase in a piece does not
+descend from one germ, because a lineage with no immigration can only narrow.</p>
+<table><thead><tr><th>winning candidate</th><th>times</th><th>share</th></tr></thead>
+<tbody>{winners}</tbody></table>
+
+<h3>Rhythms it decided on</h3>
+<p>A pattern is a grid of slots — one cycle of the bar at some subdivision. The starting weights
+are the metrical hierarchy the meter implies, derived from the arithmetic rather than tabulated,
+which is why 7/4 works the same way 4/4 does. Then it auditions patterns against that grid, and
+after every movement <b>the grid moves toward whatever it actually played.</b></p>
+{figures}
+<p class="sub">Seed {piece.seed}, {piece.mood.nearest_theme()}, {CHOICE_SECONDS:.0f} seconds.
+Filled cells are strikes; a cell underlined in green sits on a slot the composer now weights
+above anything the metrical hierarchy gave it.</p>
+
+<table><thead><tr><th>criterion</th><th>what it measures</th></tr></thead>
+<tbody>{rhythmic}</tbody></table>
+
+<div class="read ok"><b>This is the channel the critic has no part in.</b> The listening loop
+teaches taste from what the music got wrong. The grids learn from what the composer chose,
+whether or not anything was wrong — which is how a slot that started as an offbeat afterthought
+ends up as the thing the voice is built around.</div>
+
+<h3>Five auditions from one piece</h3>
+{auditions}
+
+<div class="q"><b>Open: the weights on the criteria are still my judgement at the start.</b>
+Where they end up is the machine's, and the page counts how far they travel — but the opening
+position, and the shape of the curve from mood to starting weight, is hand-written. The same
+objection as the aesthetic bands, one layer along.</div>
+
+<div class="q"><b>Open: a losing candidate is discarded, not heard.</b> The runners-up are
+scored and thrown away. The ghost layer is exactly the idea of keeping them — playing them
+quietly under the winner so the machine's uncertainty becomes audible. The scoring machinery
+this needed now exists and the candidates now exist; what is missing is the mixing.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -783,6 +952,7 @@ def build() -> str:
     data = survey()
     example = worked_example()
     series = evolution_survey()
+    choices = choice_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -833,6 +1003,12 @@ byte for byte.</div>
 <div class="read"><b>And it changes its mind while writing.</b> After each movement it
 listens back to what it actually wrote, scores it against named aesthetic principles, and shifts
 the parameters it writes with — including how hard it reacts to itself.</div>
+<div class="read"><b>It chooses its melodies rather than reciting one.</b> Each phrase is
+auditioned against several alternatives — mutations of the line just played, a return to the
+germ, the occasional line invented from nothing — and the winner becomes the parent of the next
+one. Rhythms work the same way, and the grid each voice plays against keeps moving toward
+whatever that voice actually chose. What it weighs those judgements by starts from the mood and
+is free to end up somewhere the starting weights never allowed.</div>
 <div class="read warn"><b>It is not finished, in a specific way.</b> The thing the project is
 named for — making the machine's own uncertainty audible — is designed but not built. What exists
 today is a composer that works; what it is aiming at is something stranger.</div>
@@ -843,6 +1019,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <button class="tab" data-panel="mood">The mood axes</button>
 <button class="tab" data-panel="palette">The palette</button>
 <button class="tab" data-panel="evolve">How it changes its mind</button>
+<button class="tab" data-panel="choose">Choosing, not reciting</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
@@ -852,6 +1029,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <div class="panel" id="mood">{panel_mood(data)}</div>
 <div class="panel" id="palette">{panel_palette(data)}</div>
 <div class="panel" id="evolve">{panel_evolve(series, example)}</div>
+<div class="panel" id="choose">{panel_choose(choices)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

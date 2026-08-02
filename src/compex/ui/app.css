@@ -195,3 +195,47 @@ pre { margin: 8px 0 0; font-size: 11.5px; color: var(--dim); white-space: pre-wr
 .did { font-size: 12px; font-family: var(--mono); color: var(--dim); margin: 2px 0; }
 .did code { color: var(--accent); background: none; padding: 0; }
 .did .note { font-family: system-ui, sans-serif; margin-left: 6px; }
+
+/* what it chose — rhythms, taste, auditions */
+.sub {
+  margin: 4px 0 8px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--dim); font-weight: 600;
+}
+#choice-panel .note { display: block; margin: 8px 0 18px; }
+
+.figures { display: grid; gap: 10px; }
+.figure { border-left: 2px solid var(--line); padding-left: 12px; }
+.figure-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.figure-head code { color: var(--accent); background: none; padding: 0; }
+.cells { display: flex; gap: 3px; margin: 6px 0 3px; flex-wrap: wrap; }
+.cell {
+  width: 14px; height: 20px; border-radius: 3px; display: inline-block;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.cell.soft { background: rgba(242, 177, 52, 0.38); border-color: rgba(242, 177, 52, 0.5); }
+.cell.hard { background: var(--accent); border-color: var(--accent); }
+.cell.learned { box-shadow: 0 2px 0 var(--accent-2); }
+.figure-foot { min-height: 4px; }
+.chip.learned { color: var(--accent-2); border-color: var(--accent-2); }
+
+.taste { display: grid; gap: 5px; }
+.weight { display: grid; grid-template-columns: 92px 1fr 92px; gap: 10px; align-items: center; }
+.wname { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+.wbar {
+  position: relative; height: 8px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.wbar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.wbar b {
+  position: absolute; top: -3px; width: 2px; height: 12px; background: var(--dim);
+}
+.wval { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.weight.moved .wbar i { background: var(--accent-2); }
+.weight.moved .wval em { color: var(--accent-2); font-style: normal; }
+
+#melody-details { margin-top: 6px; }
+.audition {
+  border-left: 2px solid var(--line); padding: 2px 0 6px 12px; margin: 6px 0;
+  font-size: 12px;
+}
+.audition code { color: var(--accent); background: none; padding: 0; }

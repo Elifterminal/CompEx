@@ -273,6 +273,45 @@ function showInfo(info) {
   $("m-summary").textContent = info.summary;
   $("m-formula").textContent = state.web.formula_text();
   drawEvolution(info.evolution || []);
+  drawChoices(info);
+}
+
+/* ---------- what it chose ---------- */
+
+function drawChoices(info) {
+  const patterns = info.patterns || [];
+  const taste = info.taste;
+  $("choice-card").hidden = patterns.length === 0;
+  if (!patterns.length) return;
+
+  $("patterns").innerHTML = patterns.map((p) => {
+    const cells = p.slots.map((velocity, i) => {
+      const weight = p.weights[i] || 0;
+      const level = velocity > 0.66 ? " hard" : velocity > 0 ? " soft" : "";
+      return `<i class="cell${level}${weight > 1 ? " learned" : ""}"></i>`;
+    }).join("");
+    return `<div class="figure">
+      <div class="figure-head"><b>${p.voice}</b>
+        <span class="hint">${p.hits} hits · ${p.subdivision} beat/slot</span></div>
+      <div class="cells">${cells}</div>
+    </div>`;
+  }).join("");
+
+  if (taste) {
+    $("taste").innerHTML = taste.criteria.map((c) => `
+      <div class="weight${c.moved ? " moved" : ""}">
+        <span class="wname">${c.name}</span>
+        <span class="wbar"><i style="width:${Math.min(100, (c.now / 3.2) * 100)}%"></i></span>
+        <span class="wval">${c.now}${c.moved ? " moved" : ""}</span>
+      </div>`).join("");
+    $("melody-summary").textContent =
+      `the ${Math.max(0, taste.auditioned - taste.chosen)} melodies it turned down`;
+  }
+
+  $("melody").innerHTML = (info.melody || []).map((choice) => `
+    <div class="audition"><b>${choice.origin}</b>
+      <span class="hint">${mmss(choice.at)} · gen ${choice.generation} ·
+        beat ${choice.considered - 1} by ${choice.margin}</span></div>`).join("");
 }
 
 function drawEvolution(steps) {

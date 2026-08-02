@@ -129,6 +129,30 @@ pre {
 .pill.ok { color: var(--accent-2); border-color: var(--accent-2); }
 .did { font-size: 12px; color: var(--dim); margin-top: 3px; }
 
+/* what it chose */
+.figures { display: grid; gap: 9px; }
+.figure { border-left: 2px solid var(--line); padding-left: 10px; }
+.figure-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.cells { display: flex; gap: 3px; margin: 5px 0; flex-wrap: wrap; }
+.cell {
+  width: 13px; height: 18px; border-radius: 3px;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.cell.soft { background: rgba(242, 177, 52, .38); border-color: rgba(242, 177, 52, .5); }
+.cell.hard { background: var(--accent); border-color: var(--accent); }
+.cell.learned { box-shadow: 0 2px 0 var(--accent-2); }
+
+.taste { display: grid; gap: 5px; padding-top: 6px; }
+.weight { display: grid; grid-template-columns: 76px 1fr 74px; gap: 8px; align-items: center; }
+.wname { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.wbar { height: 7px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.wbar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.wval { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.weight.moved .wbar i { background: var(--accent-2); }
+.weight.moved .wval { color: var(--accent-2); }
+
+.audition { padding: 4px 0; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+
 /* dock */
 .dock {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;

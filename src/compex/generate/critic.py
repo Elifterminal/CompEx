@@ -40,6 +40,15 @@ LEAP_SEMITONES = 4.0       # above this an interval counts as a skip rather than
 RECENT_BEATS = 32.0        # how far back "recently" reaches when judging novelty
 MIN_NOTES = 6              # below this there is not enough material to judge
 
+#: Roughness of an interval class against the tonic — the standard consonance
+#: ordering: unison and fifths calm, seconds and tritones not. Lives here
+#: because the composer judges candidate notes with the same ear it judges
+#: finished music with; two tables would drift apart the first time either moved.
+ROUGHNESS: dict[int, float] = {
+    0: 0.0, 7: 0.12, 5: 0.18, 4: 0.22, 3: 0.26, 9: 0.30,
+    8: 0.36, 2: 0.52, 10: 0.56, 11: 0.72, 1: 0.86, 6: 0.95,
+}
+
 
 @dataclass(frozen=True)
 class Analysis:
@@ -313,15 +322,12 @@ def _spread(pitches: Sequence[float]) -> float:
 def _dissonance(notes: Sequence[Note], scale: tuple[int, ...], root_pitch: int) -> float:
     """Roughness of each sounding pitch against the tonic, by interval class.
 
-    Uses the standard consonance ordering: unison/octave and fifths are calm,
-    seconds and tritones are not. Crude next to a real roughness model, and
-    enough to tell a plagal drift from a tritone pile-up.
+    Crude next to a real roughness model, and enough to tell a plagal drift
+    from a tritone pile-up.
     """
-    weight = {0: 0.0, 7: 0.12, 5: 0.18, 4: 0.22, 3: 0.26, 9: 0.30,
-              8: 0.36, 2: 0.52, 10: 0.56, 11: 0.72, 1: 0.86, 6: 0.95}
     if not notes:
         return 0.3
-    total = sum(weight.get(int(round(n.pitch - root_pitch)) % 12, 0.5) for n in notes)
+    total = sum(ROUGHNESS.get(int(round(n.pitch - root_pitch)) % 12, 0.5) for n in notes)
     return total / len(notes)
 
 

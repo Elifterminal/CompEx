@@ -12,6 +12,14 @@ next one. The harmony is reharmonised under the new drives, the motif is
 either developed further or recalled through a lossy memory, and the note
 writing itself reads the drives rather than fixed constants.
 
+Two of those decisions are big enough to have their own modules. Every phrase
+the lead plays is **auditioned** — several candidates imagined, judged, and one
+kept (:mod:`compex.generate.melody`) — and every rhythm is a **pattern the
+composer decided on** and keeps revising out of what it has already played
+(:mod:`compex.generate.pattern`). Both are governed by weights that start
+somewhere derived from the mood and then go wherever the music argues for,
+including past where they started.
+
 So the second half of a piece is a consequence of the first half, not just of
 the seed. It still comes out identical every time — the analysis is
 deterministic and so is everything it feeds.
@@ -23,12 +31,14 @@ import math
 from dataclasses import dataclass
 
 from compex import rng
-from compex.generate import critic, recall, theory
+from compex.generate import critic, melody, pattern, recall, theory, write
 from compex.generate.critic import Analysis, Verdict
 from compex.generate.evolve import Drives, Evolution, initial_drives, respond, trace
 from compex.generate.material import Movement, Note, Stroke
+from compex.generate.melody import Choice, Phrase, Taste
 from compex.generate.mood import Mood
 from compex.generate.palette import (
+    DRUM_COLOUR,
     ROLE_BASS,
     ROLE_LEAD,
     ROLE_PAD,
@@ -38,8 +48,8 @@ from compex.generate.palette import (
     build_kit,
     build_voice,
 )
+from compex.generate.pattern import Grid, Groove, Pattern, PatternChoice
 from compex.generate.theory import Chord, Motif
-from compex.timing import Comb
 
 MIN_BPM, MAX_BPM = 52.0, 168.0
 MIN_MOVEMENTS, MAX_MOVEMENTS = 2, 8
@@ -47,24 +57,25 @@ SECONDS_PER_MOVEMENT = 16.0
 
 ARCHETYPES: tuple[str, ...] = ("arch", "ramp", "terraced", "return", "through", "erode")
 
-#: Beats between hits for each drum, before density thins or doubles them.
-DRUM_PERIODS: dict[str, tuple[float, ...]] = {
-    "kick": (1.0, 2.0, 2.0, 4.0),
-    "snare": (4.0, 4.0, 8.0),
-    "hat": (0.25, 0.5, 0.5, 1.0),
-    "tom": (3.0, 5.0, 6.0, 8.0),
-    "rim": (1.5, 2.0, 3.0),
-    "clap": (4.0, 8.0),
-    "ride": (0.5, 1.0, 1.0, 2.0),
-    "crash": (8.0, 16.0, 16.0),
-    "shaker": (0.25, 0.25, 0.5),
-    "cowbell": (2.0, 3.0, 4.0),
-    "woodblock": (1.0, 1.5, 2.0),
-    "conga": (1.0, 1.5, 2.0, 3.0),
-    "snap": (2.0, 4.0),
-    "boom": (4.0, 8.0),
-    "anvil": (6.0, 8.0, 16.0),
-}
+#: How the bass sits in the pattern machinery. It is not a drum, so it has no
+#: entry in the kit's colour map — but it needs the same two numbers, and a
+#: low, fairly gentle voice is what a bass is.
+BASS_CHARACTER = (0.18, 0.35)
+
+
+@dataclass(frozen=True)
+class Retuning:
+    """What one listen-back did to the composer's taste, as opposed to its drives."""
+
+    movement: int
+    movement_name: str
+    taste: tuple[melody.Shift, ...]
+    groove: tuple[pattern.Shift, ...]
+
+    def note(self) -> str:
+        moved = [shift.describe() for shift in self.taste]
+        moved += [shift.describe() for shift in self.groove]
+        return "; ".join(moved) if moved else "taste held"
 
 
 @dataclass(frozen=True)
@@ -82,11 +93,17 @@ class Composition:
     motif: Motif
     movements: tuple[Movement, ...]
     voices: tuple[VoiceSpec, ...]
-    combs: tuple[Comb, ...]
     notes: tuple[Note, ...]
     strokes: tuple[Stroke, ...]
     evolution: tuple[Evolution, ...] = ()
     final_drives: Drives = Drives()
+    melodies: tuple[Choice, ...] = ()
+    patterns: tuple[PatternChoice, ...] = ()
+    grids: tuple[Grid, ...] = ()
+    retunings: tuple[Retuning, ...] = ()
+    taste: Taste = Taste()
+    opening_taste: Taste = Taste()
+    groove: Groove = Groove()
 
     @property
     def seconds_per_beat(self) -> float:
@@ -106,10 +123,26 @@ class Composition:
     def evolution_trace(self) -> str:
         return trace(self.evolution)
 
+    def melody_trace(self) -> str:
+        return melody.trace(self.melodies)
+
+    def pattern_trace(self) -> str:
+        return pattern.trace(self.patterns)
+
+    def final_patterns(self) -> tuple[Pattern, ...]:
+        """The last pattern each voice settled on."""
+        latest: dict[str, Pattern] = {}
+        for choice in self.patterns:
+            latest[choice.voice] = choice.pattern
+        return tuple(latest[voice] for voice in sorted(latest))
+
     def summary(self) -> str:
         pitched = [v for v in self.voices if v.role != ROLE_PERC]
         drums = [v for v in self.voices if v.role == ROLE_PERC]
         corrections = sum(len(step.adjustments) for step in self.evolution)
+        auditioned = sum(choice.considered for choice in self.melodies)
+        strayed = self.taste.strayed_from(self.opening_taste)
+        moved = sum(1 for grid in self.grids if grid.past_start())
         return "\n".join([
             f"{self.bpm:.1f} BPM in {self.beats_per_bar}/4 · {self.scale_name.replace('_', ' ')}"
             f" on {_pitch_name(self.root_pitch)}",
@@ -119,6 +152,12 @@ class Composition:
             "voices: " + ", ".join(f"{v.role}/{v.engine}" for v in pitched),
             "kit: " + (", ".join(v.voice_id for v in drums) or "none"),
             f"{len(self.notes)} notes, {len(self.strokes)} strokes",
+            f"melody: {len(self.melodies)} phrases chosen out of {auditioned} imagined, "
+            f"{_generations(self.melodies)} generations deep",
+            "patterns: " + (", ".join(f"{p.voice} |{p.describe()}|"
+                                      for p in self.final_patterns()) or "none"),
+            f"taste moved on: {', '.join(strayed) if strayed else 'nothing'}"
+            f" · {moved} rhythm grid(s) past their starting weights",
             f"evolved: {corrections} corrections over {len(self.evolution)} listen-backs, "
             f"plasticity {self.final_drives.plasticity:.2f}",
         ])
@@ -149,14 +188,26 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     movements = _movements(seed, duration_s, bpm, beats_per_bar, mood, archetype)
     voices = _voices(seed, mood)
     kit = build_kit(seed, mood)
-    combs = _combs(seed, kit, beats_per_bar, mood)
+    grids = _grids(seed, kit, voices, beats_per_bar, mood)
     lead_voices = frozenset(v.voice_id for v in voices if v.role == ROLE_LEAD)
 
     drives = initial_drives(mood, root_pitch)
+    opening_taste = melody.initial_taste(mood)
+    taste = opening_taste
+    groove = pattern.initial_groove(mood)
+
     notes: list[Note] = []
     strokes: list[Stroke] = []
     history: list[Evolution] = []
+    melodies: list[Choice] = []
+    patterns: list[PatternChoice] = []
+    retunings: list[Retuning] = []
+
     current_motif = motif
+    lineage: Phrase | None = None
+    heard: frozenset[tuple[int, int]] = frozenset()
+    approach: int | None = None
+    figures: dict[str, Pattern] = {}
     cursor = 0.0
 
     for index, movement in enumerate(movements):
@@ -173,18 +224,38 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
                 before=before, after=drives,
             ))
 
+            # The same verdicts teach the ear as well as the hand: drives are
+            # what it writes with, taste is what it listens for when choosing.
+            recent = tuple(c for c in melodies if c.movement == index - 1)
+            taste, taste_shifts = melody.retune(taste, opening_taste, verdicts, recent, drives)
+            groove, groove_shifts = pattern.retune(groove, verdicts, drives)
+            retunings.append(Retuning(index, movement.name, taste_shifts, groove_shifts))
+
             current_motif, used = _next_motif(current_motif, sketch, seed, index,
                                               movement.tension, drives)
             drives = drives.with_use(used)
 
         working = _reharmonise(progression, seed, index, drives, scale)
 
-        written, hit = _write_movement(
-            seed, index, movement, cursor, scale, root_pitch, working,
-            chord_beats, current_motif, voices, combs, kit, drives,
+        figures, chosen = write.choose_patterns(
+            seed, index, movement, grids, groove, drives,
+            float(beats_per_bar), figures)
+        patterns.extend(chosen)
+
+        written = write.write_movement(
+            seed, index, movement, cursor, scale, root_pitch, working, chord_beats,
+            current_motif, voices, kit, figures, drives, taste, lineage, heard, approach,
         )
-        notes.extend(written)
-        strokes.extend(hit)
+        notes.extend(written.notes)
+        strokes.extend(written.strokes)
+        melodies.extend(written.choices)
+        lineage, heard, approach = written.lineage, written.heard, written.approach
+
+        # What it played is what it now believes belongs there. This is the
+        # channel the critic has no part in — the grids learn from the output.
+        grids = {voice: pattern.learn(grid, figures[voice], drives.plasticity)
+                 if voice in figures else grid
+                 for voice, grid in grids.items()}
         cursor += movement.beats
 
     notes.sort(key=lambda note: (note.start, note.voice))
@@ -194,9 +265,12 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         seed=seed, mood=mood, bpm=bpm, beats_per_bar=beats_per_bar, root_pitch=root_pitch,
         scale_name=scale_name, scale=scale, archetype=archetype, progression=progression,
         chord_beats=chord_beats, motif=motif, movements=movements,
-        voices=tuple(voices) + kit, combs=combs,
+        voices=tuple(voices) + kit,
         notes=tuple(notes), strokes=tuple(strokes),
         evolution=tuple(history), final_drives=drives,
+        melodies=tuple(melodies), patterns=tuple(patterns),
+        grids=tuple(grids.values()), retunings=tuple(retunings),
+        taste=taste, opening_taste=opening_taste, groove=groove,
     )
 
 
@@ -336,155 +410,29 @@ def _voices(seed: int, mood: Mood) -> list[VoiceSpec]:
     return voices
 
 
-def _combs(seed: int, kit: tuple[VoiceSpec, ...], beats_per_bar: int,
-           mood: Mood) -> tuple[Comb, ...]:
-    combs: list[Comb] = []
-    for index, drum in enumerate(kit):
-        pool = DRUM_PERIODS.get(drum.voice_id, (2.0, 4.0))
-        period = float(rng.pick(seed, f"comb-{drum.voice_id}", index, pool))
-        if mood.density > 0.72 and period > 0.5:
-            period /= 2.0
-        elif mood.density < 0.28 and period < 8.0:
-            period *= 2.0
-        offset = 0.0 if drum.voice_id == "kick" else round(
-            rng.uniform(seed, f"comb-off-{drum.voice_id}", index) * period * 2
-        ) / 2.0
-        combs.append(Comb(name=drum.voice_id, period_beats=period, offset_beats=offset % period))
-    return tuple(combs)
+def _grids(seed: int, kit: tuple[VoiceSpec, ...], voices: list[VoiceSpec],
+           beats_per_bar: int, mood: Mood) -> dict[str, Grid]:
+    """A rhythm grid per voice that plays rhythms, drums and bass alike.
 
-
-# ── writing the notes, under the current drives ───────────────────────────
-
-def _write_movement(seed, index, movement, origin, scale, root_pitch, progression,
-                    chord_beats, motif, voices, combs, kit, drives):
-    notes: list[Note] = []
-    strokes: list[Stroke] = []
-
-    end = origin + movement.beats
-    chord_index = 0
-    cursor = origin
-    while cursor < end - 1e-6:
-        chord = progression[chord_index % len(progression)]
-        span = min(chord_beats, end - cursor)
-        for voice in voices:
-            notes.extend(
-                _voice_notes(seed, index, chord_index, voice, chord, scale, root_pitch,
-                             cursor, span, movement, motif, drives)
-            )
-        cursor += span
-        chord_index += 1
-
-    gate = movement.energy * drives.density_bias
-    for drum, comb in zip(kit, combs):
-        for beat in comb.hits(origin, end):
-            if rng.uniform(seed, f"gate-{drum.voice_id}", int(beat * 4)) > gate + 0.18:
-                continue
-            velocity = _clamp(
-                0.45 + 0.55 * movement.energy
-                + rng.between(seed, f"vel-{drum.voice_id}", int(beat * 4), -0.14, 0.14),
-                0.1, 1.0,
-            )
-            strokes.append(Stroke(start=beat, velocity=velocity, voice=drum.voice_id))
-
-    return notes, strokes
-
-
-def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pitch,
-                 start, span, movement, motif, drives) -> list[Note]:
-    stream = f"{voice.voice_id}-{movement_index}-{chord_index}"
-    base = root_pitch + 12 * voice.octave
-    velocity = _clamp(0.35 + 0.65 * movement.energy, 0.08, 1.0)
-
-    if voice.role == ROLE_PAD:
-        pitches = [base + step for step in chord.semitones(scale)]
-        return [
-            Note(start=start, duration=span, pitch=float(pitch), velocity=velocity * 0.7,
-                 voice=voice.voice_id)
-            for pitch in pitches
-        ]
-
-    if voice.role == ROLE_BASS:
-        root = float(base + theory.degree_semitone(scale, chord.degree))
-        hits = [0.0]
-        subdivision = 1.0 if movement.energy < 0.5 else 0.5
-        position = subdivision
-        appetite = movement.energy * 0.55 * drives.density_bias
-        while position < span:
-            if rng.uniform(seed, f"{stream}-b", int(position * 4)) < appetite:
-                hits.append(position)
-            position += subdivision
-        return [
-            Note(start=start + offset,
-                 duration=min(subdivision, span - offset),
-                 pitch=root, velocity=velocity, voice=voice.voice_id)
-            for offset in hits
-        ]
-
-    if voice.role == ROLE_TEXTURE:
-        if rng.uniform(seed, f"{stream}-t", 0) > 0.35 + movement.energy * 0.4:
-            return []
-        pitch = float(base + theory.degree_semitone(scale, chord.degree + 4))
-        return [Note(start=start, duration=span * 0.9, pitch=pitch,
-                     velocity=velocity * 0.55, voice=voice.voice_id)]
-
-    # lead — speak the motif over this chord, then rest
-    rest_gate = 0.22 + movement.energy * 0.72 * drives.density_bias
-    if rng.uniform(seed, f"{stream}-rest", 0) > rest_gate:
-        return []
-
-    # Novelty pressure rotates the motif's starting point per chord, so a
-    # restless composer stops saying the same phrase over every chord. Without
-    # this the novelty drive has no way to affect what novelty measures.
-    turn = chord_index if drives.novelty_pressure > 0.5 else 0
-    steps = _rotate(motif.steps, turn)
-    rhythm = _rotate(motif.rhythm, turn)
-
-    notes: list[Note] = []
-    offset = 0.0
-    # register_reach *scales* the line as well as bounding it. Clamping alone
-    # can only ever narrow a melody, so the drive could never answer a
-    # complaint that the range was too small.
-    stretch = 0.55 + drives.register_reach * 1.6
-    reach = 1 + int(drives.register_reach * 6)
-    for position, (step, length) in enumerate(zip(steps, rhythm)):
-        if offset >= span:
-            break
-        widened = int(round(step * stretch))
-        bounded = max(-reach, min(reach, widened))
-        pitch = float(base + theory.degree_semitone(scale, chord.degree + bounded))
-        pitch = _pull_toward_centre(pitch, drives, seed, stream, position)
-        notes.append(Note(
-            start=start + offset,
-            duration=min(length, span - offset),
-            pitch=pitch,
-            velocity=_clamp(velocity + rng.between(seed, f"{stream}-v", position, -0.12, 0.12),
-                            0.08, 1.0),
-            voice=voice.voice_id,
-        ))
-        offset += length
-    return notes
-
-
-def _rotate(values: tuple, turn: int) -> tuple:
-    if not values or turn % len(values) == 0:
-        return values
-    offset = turn % len(values)
-    return values[offset:] + values[:offset]
-
-
-def _pull_toward_centre(pitch: float, drives: Drives, seed: int, stream: str,
-                        position: int) -> float:
-    """Octave-shift a note back toward the tessitura centre.
-
-    Shifting by octaves rather than nudging by semitones keeps the note inside
-    the scale — the line comes home without going out of key to do it.
+    The drums go first so the bass has to find room around them rather than the
+    other way round — a kick that has to dodge the bass stops being a kick.
     """
-    distance = pitch - drives.register_centre
-    if abs(distance) <= 7.0:
-        return pitch
-    if rng.uniform(seed, f"{stream}-pull", position) > drives.register_pull:
-        return pitch
-    return pitch - 12.0 * (1 if distance > 0 else -1)
+    grids: dict[str, Grid] = {}
+    for index, drum in enumerate(kit):
+        brightness, aggression = DRUM_COLOUR.get(drum.voice_id, (0.5, 0.5))
+        grids[drum.voice_id] = pattern.build_grid(
+            drum.voice_id, seed, index, beats_per_bar, mood, brightness, aggression)
+
+    for offset, voice in enumerate(v for v in voices if v.role == ROLE_BASS):
+        brightness, aggression = BASS_CHARACTER
+        grids[voice.voice_id] = pattern.build_grid(
+            voice.voice_id, seed, len(kit) + offset, beats_per_bar, mood,
+            brightness, aggression)
+    return grids
+
+
+def _generations(melodies: tuple[Choice, ...]) -> int:
+    return max((choice.chosen.generation for choice in melodies), default=0)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
