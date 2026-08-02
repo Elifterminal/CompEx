@@ -175,3 +175,69 @@ class PieceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrowdingTests(unittest.TestCase):
+    """The composer's half of the mix: moving voices apart, not turning them up.
+
+    The mixer can only make a thick voice louder. Two lines in the same octave
+    are heard as one thicker line however it is levelled, and the only thing
+    that fixes it is writing them somewhere else — which nothing but the
+    composer can do.
+    """
+
+    def test_voices_in_the_same_register_read_as_crowded(self):
+        from compex.generate.critic import _crowding
+        from compex.generate.material import Note
+
+        together = [Note(float(i), 1.0, 60.0 + (i % 2), 0.5, f"v{i % 2}") for i in range(12)]
+        apart = [Note(float(i), 1.0, 40.0 + 30.0 * (i % 2), 0.5, f"v{i % 2}") for i in range(12)]
+        self.assertGreater(_crowding(together, 12.0), _crowding(apart, 12.0))
+
+    def test_one_voice_alone_is_never_crowded(self):
+        from compex.generate.critic import _crowding
+        from compex.generate.material import Note
+
+        alone = [Note(float(i), 1.0, 60.0, 0.5, "only") for i in range(8)]
+        self.assertEqual(_crowding(alone, 8.0), 0.0)
+
+    def test_spacing_moves_the_voices_apart(self):
+        from compex.generate.palette import ROLE_BASS, ROLE_LEAD, ROLE_PAD, VoiceSpec
+        from compex.generate.write import spread
+
+        voices = [VoiceSpec("bass", "sub", ROLE_BASS, octave=1),
+                  VoiceSpec("pad", "pad", ROLE_PAD, octave=2),
+                  VoiceSpec("lead", "flute", ROLE_LEAD, octave=3)]
+        tight = spread(voices, 0.0)
+        wide = spread(voices, 1.5)
+        self.assertEqual(set(tight.values()), {0})
+        self.assertGreater(max(wide.values()) - min(wide.values()), 0)
+
+    def test_nothing_is_pushed_off_the_keyboard(self):
+        from compex.generate.write import PITCH_RANGE
+
+        piece = compose(7788, 120.0, THEMES["frantic"])
+        low, high = PITCH_RANGE
+        for note in piece.notes:
+            self.assertTrue(low <= note.pitch <= high, f"{note.voice} at {note.pitch}")
+
+    def test_the_drive_can_move_what_it_measures(self):
+        """A correction that cannot reach its own measurement is theatre."""
+        from dataclasses import replace
+
+        from compex.generate import critic, evolve
+
+        def crowding_at(spacing: float) -> float:
+            real = evolve.initial_drives
+            with patch("compex.generate.compose.initial_drives",
+                       lambda mood, root: replace(real(mood, root), spacing=spacing)):
+                total = 0.0
+                for theme in ("hypnotic", "menacing", "euphoric"):
+                    piece = compose(7788, 120.0, THEMES[theme])
+                    lead = frozenset(v.voice_id for v in piece.voices if v.role == "lead")
+                    total += critic.analyse(piece.notes, piece.strokes, piece.motif,
+                                            piece.scale, piece.root_pitch,
+                                            piece.total_beats, lead).crowding
+            return total
+
+        self.assertLess(crowding_at(1.5), crowding_at(0.0))

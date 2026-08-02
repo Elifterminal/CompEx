@@ -65,6 +65,7 @@ class Analysis:
     density: float             # events per beat, normalised against a busy reference
     motif_presence: float      # how much of the germ's contour is still audible
     revelation: float = 0.5    # share of its own opening the piece has since explained
+    crowding: float = 0.0      # how much the voices are sitting on top of each other
 
     def is_empty(self) -> bool:
         return self.note_count < MIN_NOTES
@@ -147,6 +148,14 @@ PRINCIPLES: tuple[Principle, ...] = (
         "entirely means the piece stopped being about anything.",
     ),
     Principle(
+        "crowding", "auditory stream segregation", 0.0, 0.45, "spacing",
+        "Two voices in the same octave playing at the same time are heard as "
+        "one thicker voice, not as two. The mixer can only make that thicker "
+        "voice louder — moving them apart is the composer's job and nobody "
+        "else can do it. Measured in registers rather than in spectra, because "
+        "registers are what the composer can actually act on.",
+    ),
+    Principle(
         "revelation", "minimum description length", 0.04, 1.0, "motif_recall",
         "A piece that ends should have made its own beginning cheaper to "
         "describe than it was at the time — five strange events turning out to "
@@ -204,6 +213,7 @@ def analyse(notes: Sequence[Note], strokes: Sequence[Stroke], motif: Motif,
         density=_density(played, strokes, upto_beat),
         motif_presence=_motif_presence(pitches, motif),
         revelation=revelation,
+        crowding=_crowding(played, upto_beat),
     )
 
 
@@ -386,6 +396,38 @@ def _motif_presence(pitches: Sequence[float], motif: Motif) -> float:
         if max(forward, mirrored) >= MOTIF_MATCH:
             matches += 1
     return matches / windows if windows else 0.6
+
+
+CROWD_WINDOW = 7.0   # semitones — inside this two voices stop being two voices
+
+
+def _crowding(notes: Sequence[Note], upto_beat: float) -> float:
+    """How much of the time two voices are sitting in each other's register.
+
+    For every pair of voices that overlap in time, how close their registers
+    are. Two lines a fifth apart are two lines; two lines three semitones
+    apart are one thick line and a mixing problem that no gain can fix.
+
+    This is deliberately symbolic. The spectral version of the question lives
+    in the mixer and needs audio; this one needs only the notes, which is what
+    makes it available *while the piece is still being written*.
+    """
+    recent = [n for n in notes if n.start >= max(0.0, upto_beat - RECENT_BEATS)]
+    by_voice: dict[str, list[float]] = {}
+    for note in recent:
+        by_voice.setdefault(note.voice, []).append(note.pitch)
+    if len(by_voice) < 2:
+        return 0.0
+
+    centres = {voice: sum(pitches) / len(pitches) for voice, pitches in by_voice.items()}
+    names = sorted(centres)
+    close = pairs = 0
+    for first in range(len(names)):
+        for second in range(first + 1, len(names)):
+            pairs += 1
+            if abs(centres[names[first]] - centres[names[second]]) < CROWD_WINDOW:
+                close += 1
+    return close / pairs if pairs else 0.0
 
 
 def _diff(values: Sequence[float]) -> list[float]:

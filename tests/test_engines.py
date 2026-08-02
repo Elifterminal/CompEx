@@ -11,6 +11,14 @@ import numpy as np
 from compex.dsp import drums, effects, engines
 from compex.dsp import fx
 from compex.dsp.engines import ENGINE_NAMES, NOTE_CEILING, NOTE_LOUDNESS
+from compex.generate.mood import THEMES
+from compex.generate.palette import (
+    ENGINES_FOR_ROLE,
+    HOLD,
+    NEEDS_HOLD,
+    ROLE_PAD,
+    choose_engine,
+)
 from compex.generate import THEMES
 from compex.generate.palette import (
     DRUM_COLOUR,
@@ -198,3 +206,57 @@ class SelectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoldTests(unittest.TestCase):
+    """The HOLD table is data about behaviour, so it has to be checked against behaviour.
+
+    A composer that believes an engine sustains will hand it a chord to hold.
+    If the engine has quietly become a struck sound, nothing fails — the music
+    just goes hollow, which is exactly what happened and what Lee heard.
+    """
+
+    PARAMS = dict(decay=1.5, release=0.15, attack=0.12, layers=3.0, detune=0.01,
+                  bright=0.6, tone=0.6, drive=1.5, noisiness=0.5, centre=800.0, q=1.0,
+                  sweep=0.2, partials=10.0, bite=0.8, rasp=0.1, breath=0.2, air=0.1,
+                  vibrato=0.004, rate=5.0, f1=530.0, f2=1840.0, singers=4.0,
+                  spread=0.006, ratio=1.4, index=2.0, width=0.3, pwm=1.0, grain=0.05,
+                  jitter=0.3, feedback=0.5, wave=0.5, morph=0.4, duty=0.5, bits=8.0,
+                  sub=0.3, cutoff=1200.0)
+
+    def measure(self, name: str) -> float:
+        spec = VoiceSpec("x", name, "pad", tuple(self.PARAMS.items()))
+        count = int(3.0 * SR)
+        voice = engines.render_note(spec, 220.0, count, SR, 3, 0)
+        early = float(np.sqrt((voice[int(0.15 * count):int(0.25 * count)] ** 2).mean()))
+        late = float(np.sqrt((voice[int(0.60 * count):int(0.75 * count)] ** 2).mean()))
+        return late / max(early, 1e-9)
+
+    def test_every_engine_has_a_measured_hold(self):
+        self.assertEqual(set(HOLD), set(ENGINE_NAMES))
+
+    def test_the_table_still_matches_the_engines(self):
+        for name in ENGINE_NAMES:
+            self.assertAlmostEqual(self.measure(name), HOLD[name], delta=0.06,
+                                   msg=f"{name} no longer behaves the way the table says")
+
+    def test_the_engines_a_pad_can_use_actually_hold(self):
+        for name in ENGINES_FOR_ROLE[ROLE_PAD]:
+            if HOLD[name] >= NEEDS_HOLD[ROLE_PAD]:
+                break
+        else:
+            self.fail("no pad engine holds a note")
+
+    def test_a_pad_is_never_given_a_struck_engine(self):
+        """38% of pads used to be bells and glasses dying under the harmony."""
+        for seed in range(25):
+            for mood in THEMES.values():
+                engine = choose_engine(seed, 2, ROLE_PAD, mood)
+                self.assertGreaterEqual(HOLD[engine], NEEDS_HOLD[ROLE_PAD],
+                                        f"{engine} decays and was chosen as a pad")
+
+    def test_there_are_enough_sustaining_engines_to_choose_between(self):
+        """The complaint was that sustained voices all sounded alike."""
+        holding = [name for name in ENGINES_FOR_ROLE[ROLE_PAD]
+                   if HOLD[name] >= NEEDS_HOLD[ROLE_PAD]]
+        self.assertGreaterEqual(len(holding), 10, f"only {len(holding)} pad engines hold")

@@ -47,6 +47,9 @@ from compex.generate.palette import (                             # noqa: E402
     DRUM_COLOUR,
     ENGINE_COLOUR,
     ENGINES_FOR_ROLE,
+    HOLD,
+    NEEDS_HOLD,
+    ROLE_PAD,
 )
 from compex.generate.theory import SCALES                         # noqa: E402
 from compex.pipeline import make_track                            # noqa: E402
@@ -165,6 +168,26 @@ MIX_SECONDS = 120.0
 PERCUSSION_BEFORE = {"hypnotic": 2.39, "menacing": 1.47, "serene": 0.43}
 
 
+def _crowding_at(spacing: float) -> float:
+    """Average crowding when the spacing drive is pinned at this value."""
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    from compex.generate import evolve
+    from compex.generate.critic import analyse
+
+    real = evolve.initial_drives
+    measured = []
+    with patch("compex.generate.compose.initial_drives",
+               lambda mood, root: replace(real(mood, root), spacing=spacing)):
+        for name in ("hypnotic", "menacing", "euphoric", "frantic"):
+            piece = compose(7788, 120.0, THEMES[name])
+            lead = frozenset(v.voice_id for v in piece.voices if v.role == "lead")
+            measured.append(analyse(piece.notes, piece.strokes, piece.motif, piece.scale,
+                                    piece.root_pitch, piece.total_beats, lead).crowding)
+    return statistics.mean(measured)
+
+
 def mix_survey() -> dict:
     """What the mixer measures across a spread of moods, and what it fixes."""
     from compex.dsp.arrange import survey
@@ -183,6 +206,12 @@ def mix_survey() -> dict:
             "lifted": sum(1 for v in decided.voices if v.trim > 1.02),
             "cut": sum(1 for v in decided.voices if v.trim < 0.98),
         })
+    # What the pad pool used to be handed, measured against the current table:
+    # every engine the old pool allowed, weighted by how often it was picked.
+    was_allowed = ("pad", "additive", "bell", "noise", "string", "choir",
+                   "organ", "drone", "glass", "supersaw")
+    decaying = [name for name in was_allowed if HOLD.get(name, 1.0) < NEEDS_HOLD[ROLE_PAD]]
+
     found = sum(len(row["buried"]) for row in rows)
     left = sum(len(row["still"]) for row in rows)
     return {
@@ -192,6 +221,7 @@ def mix_survey() -> dict:
         "rescued": found - left,
         "left": left,
         "percussive": statistics.mean([row["percussive"] for row in rows]),
+        "decaying_before": 100.0 * len(decaying) / len(was_allowed),
         "loudest": max(rows, key=lambda row: row["percussive"]),
     }
 
@@ -1173,6 +1203,17 @@ Unpaid longing becomes audible as the thing the piece decided not to do.</div>
 def panel_mix(survey) -> str:
     from compex.dsp.balance import BAND_NAMES, CEILING, FLOOR
     from compex.dsp.engines import NOTE_LOUDNESS
+    from compex.generate.critic import CROWD_WINDOW
+
+    crowd_window = CROWD_WINDOW
+    crowd_none, crowd_wide = _crowding_at(0.0), _crowding_at(1.5)
+    decaying_share = survey["decaying_before"]
+    holding_count = sum(1 for name in ENGINES_FOR_ROLE[ROLE_PAD]
+                        if HOLD[name] >= NEEDS_HOLD[ROLE_PAD])
+    holds = "".join(
+        f"<tr><td><code>{name}</code></td><td>{HOLD[name]:.2f}</td>"
+        f"<td class='sub'>{'yes' if name in ENGINES_FOR_ROLE[ROLE_PAD] and HOLD[name] >= NEEDS_HOLD[ROLE_PAD] else '—'}</td></tr>"
+        for name in sorted(HOLD, key=lambda key: -HOLD[key]))
 
     example = survey["example"]
     rows = "".join(
@@ -1262,11 +1303,51 @@ of a band three other drums are already fighting over needs about ten times its 
 which is not a mix decision, it is an arrangement problem. The stage reports what it could not fix
 rather than quietly lifting until something clips.</div>
 
-<div class="q"><b>Open: the composer still cannot hear the mix.</b> This is a mixer — it runs after
-composition, it never sees the critic, and no principle measures balance. So a piece that writes
-four voices into the same band gets a good mix of a crowded arrangement rather than being told to
-write a less crowded one. Making balance a principle the composer answers to is the obvious next
-step, and it is not built.</div>
+<h3>The other half: what only the composer can fix</h3>
+<p>A mixer can make a thick voice louder. It cannot make it two voices. Two lines inside the same
+octave are heard as one thicker line however they are levelled, and the only thing that changes
+that is writing them somewhere else — which is the composer's job and nobody else's.</p>
+
+<p>So the critic gained a principle it can act on: <b>crowding</b>, the share of simultaneous voice
+pairs whose registers sit within {crowd_window:.0f} semitones of each other. It is deliberately
+symbolic — registers rather than spectra — because that is the question the composer can answer
+while the piece is still being written. It drives <code>spacing</code>, which spreads the voices
+apart in octaves between movements.</p>
+
+<div class="read ok"><b>The loop closes, measured:</b> at spacing 0 the sampled pieces average
+{crowd_none:.2f} crowding; at 1.5 they average {crowd_wide:.2f}. A drive that could not move its
+own measurement would be theatre, and this one is checked in the tests rather than asserted here.</div>
+
+<h3>Sustained sounds, and why they all sounded alike</h3>
+<p>The second half of the same listening complaint: <i>"the sustained sounds are almost all sort of
+annoying… I think it is choosing from a small set."</i> Measured, and it was worse than that —
+nothing was measuring whether an engine <b>holds a note at all</b>.</p>
+
+<div class="read warn"><b>{decaying_share:.0f}% of everything chosen to hold a chord was a struck
+sound.</b> A bell, a glass, a noise wash — engines that swell and die under a harmony that is still
+moving. That is both why the sustained voices sounded like each other and why the whole piece read
+as percussive: much of what should have been sustaining was, in effect, more percussion.</div>
+
+<p>Each engine now carries a measured <b>hold</b> — its level two thirds of the way through a long
+note against its level just after the attack — and a role that has to sustain only draws from
+engines that do. The table is regenerated by the test suite, so an engine that quietly stops
+holding fails the build rather than the music.</p>
+
+<table><thead><tr><th>engine</th><th>holds</th><th>can be a pad</th></tr></thead><tbody>{holds}</tbody></table>
+
+<p>And five engines were added, because the ones that genuinely sustained numbered six:
+<code>bowed</code> (one player rather than a section, with the vibrato arriving after the note),
+<code>shimmer</code> (inharmonic partials beating against each other indefinitely),
+<code>tape</code> (wow and flutter on two timescales that never line up),
+<code>vox</code> (a held vowel that travels to another vowel while it is held), and
+<code>aeolian</code> (tuned noise — wind with a pitch in it, unlike the untuned wash that was
+reading as breath). Pads now draw from {holding_count} engines that all hold.</p>
+
+<div class="q"><b>Still open: the mixer's own measurement never reaches the critic.</b> The composer
+answers for register crowding, which it can hear about in its own terms. It still does not know
+that its pad and its texture are fighting over the same frequency band — that measurement exists,
+in the mixer, after composition is finished. Closing that would mean rendering during composition,
+which is the expensive kind of honest.</div>
 
 <div class="q"><b>Open: the floors and ceilings are mine.</b> Same objection as the aesthetic bands
 and the opening taste curve, one layer along. They are measured against real pieces, which catches

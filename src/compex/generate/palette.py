@@ -57,17 +57,53 @@ ENGINE_COLOUR: dict[str, tuple[float, float, float]] = {
     "wavetable": (0.60, 0.48, 0.58),
     "feedback": (0.35, 0.88, 0.62),
     "chip": (0.72, 0.62, 0.75),
+    # sustaining, added 2026-08-02 because the ones that actually held a note
+    # were six and it was audible
+    "bowed": (0.44, 0.28, 0.40),
+    "shimmer": (0.82, 0.14, 0.34),
+    "tape": (0.40, 0.38, 0.30),
+    "vox": (0.50, 0.22, 0.44),
+    "aeolian": (0.66, 0.34, 0.24),
 }
+
+#: How much of its level an engine still has in the middle of a long note,
+#: measured rather than asserted: RMS two thirds of the way through against
+#: RMS just after the attack. ``tests/test_engines.py`` recomputes every one of
+#: these and fails if an engine stops behaving the way the composer believes
+#: it does.
+#:
+#: This exists because of a listening complaint that turned out to be exactly
+#: right. Nearly 40% of everything chosen to hold a chord was a struck sound
+#: quietly dying under it — a bell, a glass, a noise wash — which is both why
+#: the sustained voices sounded alike and why the whole thing read as
+#: percussive.
+HOLD: dict[str, float] = {
+    "shimmer": 1.79, "string": 1.50, "choir": 1.17, "brass": 1.00,
+    "flute": 1.00, "tape": 1.00, "organ": 0.97, "bowed": 0.96,
+    "reed": 0.95, "pad": 0.92, "vox": 0.91, "drone": 0.89,
+    "supersaw": 0.80, "aeolian": 0.62, "sub": 0.56, "bell": 0.47,
+    "granular": 0.41, "additive": 0.39, "chip": 0.39, "formant": 0.39,
+    "pm": 0.39, "mallet": 0.38, "tine": 0.38, "glass": 0.37,
+    "wavetable": 0.37, "chime": 0.36, "noise": 0.25, "pluck": 0.03,
+    "feedback": 0.00,
+}
+
+#: What a role needs an engine to do. A pad that dies halfway through the bar
+#: is not a pad, whatever its name is.
+NEEDS_HOLD: dict[str, float] = {ROLE_PAD: 0.60, ROLE_TEXTURE: 0.30}
 
 ENGINES_FOR_ROLE: dict[str, tuple[str, ...]] = {
     ROLE_BASS: ("sub", "pm", "formant", "additive", "pluck", "reed",
-                "supersaw", "feedback", "chip", "organ"),
+                "supersaw", "feedback", "chip", "organ", "tape"),
     ROLE_LEAD: ("pluck", "bell", "pm", "additive", "formant", "mallet", "tine",
-                "glass", "chime", "reed", "brass", "flute", "chip", "wavetable"),
-    ROLE_PAD: ("pad", "additive", "bell", "noise", "string", "choir",
-               "organ", "drone", "glass", "supersaw"),
+                "glass", "chime", "reed", "brass", "flute", "chip", "wavetable",
+                "bowed", "vox"),
+    ROLE_PAD: ("pad", "string", "choir", "organ", "drone", "supersaw",
+               "bowed", "shimmer", "tape", "vox", "aeolian",
+               "additive", "bell", "noise", "glass"),
     ROLE_TEXTURE: ("noise", "bell", "pm", "formant", "pluck", "granular",
-                   "feedback", "wavetable", "chime", "drone", "chip"),
+                   "feedback", "wavetable", "chime", "drone", "chip",
+                   "shimmer", "aeolian", "vox"),
 }
 
 DRUM_VOICES: tuple[str, ...] = (
@@ -146,10 +182,22 @@ class VoiceSpec:
 
 
 def choose_engine(seed: int, index: int, role: str, mood: Mood) -> str:
-    """Pick an engine for ``role`` whose character sits near the mood."""
+    """Pick an engine for ``role`` whose character sits near the mood.
+
+    Roles that have to hold a note only draw from engines that actually do.
+    The pool used to include struck sounds for pads on the grounds that a bell
+    can be a pad if you squint, and the result was a piece where nearly half of
+    what should have been sustaining was decaying away under the harmony.
+    """
     candidates = ENGINES_FOR_ROLE.get(role)
     if not candidates:
         raise ValueError(f"no engines registered for role {role!r}")
+
+    needed = NEEDS_HOLD.get(role)
+    if needed is not None:
+        holding = tuple(name for name in candidates if HOLD.get(name, 0.0) >= needed)
+        if holding:
+            candidates = holding
 
     target = (mood.valence, mood.grit, mood.energy)
     ranked = sorted(
@@ -512,10 +560,67 @@ def _noise(seed, stream, mood):
             ("decay", rng.between(seed, f"{stream}-decay", 0, 0.3, 2.8)))
 
 
+def _bowed(seed, stream, mood):
+    return (("partials", float(8 + int(rng.uniform(seed, f"{stream}-n", 0) * 8))),
+            ("tilt", rng.between(seed, f"{stream}-tilt", 0, 1.0, 1.7)),
+            ("vibrato", rng.between(seed, f"{stream}-vib", 0, 0.002, 0.011)),
+            ("rate", rng.between(seed, f"{stream}-rate", 0, 4.0, 6.5)),
+            ("grip", 0.1 + mood.grit * 0.45),
+            ("bite", rng.between(seed, f"{stream}-bite", 0, 0.04, 0.16)),
+            ("attack", rng.between(seed, f"{stream}-att", 0, 0.12, 0.5)),
+            ("release", rng.between(seed, f"{stream}-rel", 0, 0.2, 0.7)))
+
+
+def _shimmer(seed, stream, mood):
+    return (("partials", float(6 + int(rng.uniform(seed, f"{stream}-n", 0) * 6))),
+            # How far the partials are stretched off the harmonic series is the
+            # whole character: 1.0 is a chord, 1.15 is a struck bar.
+            ("stretch", 1.0 + rng.between(seed, f"{stream}-st", 0, 0.01, 0.06)
+             + mood.tension * 0.06),
+            ("spread", rng.between(seed, f"{stream}-sp", 0, 0.002, 0.009)),
+            ("cutoff", rng.between(seed, f"{stream}-cut", 0, 2200.0, 6500.0)),
+            ("attack", rng.between(seed, f"{stream}-att", 0, 0.25, 0.9)),
+            ("release", rng.between(seed, f"{stream}-rel", 0, 0.6, 1.8)))
+
+
+def _tape(seed, stream, mood):
+    return (("partials", float(5 + int(rng.uniform(seed, f"{stream}-n", 0) * 6))),
+            ("wow", rng.between(seed, f"{stream}-wow", 0, 0.001, 0.007)),
+            ("wow_rate", rng.between(seed, f"{stream}-wr", 0, 0.4, 1.1)),
+            ("flutter", rng.between(seed, f"{stream}-fl", 0, 0.0005, 0.003)),
+            ("flutter_rate", rng.between(seed, f"{stream}-fr", 0, 5.5, 9.5)),
+            ("saturation", 0.6 + mood.grit * 2.4),
+            ("hiss", 0.004 + mood.grit * 0.02),
+            ("cutoff", rng.between(seed, f"{stream}-cut", 0, 3000.0, 7000.0)),
+            ("attack", rng.between(seed, f"{stream}-att", 0, 0.04, 0.2)),
+            ("release", rng.between(seed, f"{stream}-rel", 0, 0.15, 0.6)))
+
+
+def _vox(seed, stream, mood):
+    first, second = rng.pick(seed, f"{stream}-from", 0, VOWELS)[:2]
+    third, fourth = rng.pick(seed, f"{stream}-to", 0, VOWELS)[:2]
+    return (("f1", first), ("f2", second), ("f1b", third), ("f2b", fourth),
+            ("partials", float(16 + int(rng.uniform(seed, f"{stream}-n", 0) * 12))),
+            ("spread", rng.between(seed, f"{stream}-sp", 0, 0.001, 0.006)),
+            ("q", rng.between(seed, f"{stream}-q", 0, 5.0, 10.0)),
+            ("air", 0.02 + airiness(mood) * 0.09),
+            ("attack", rng.between(seed, f"{stream}-att", 0, 0.2, 0.7)),
+            ("release", rng.between(seed, f"{stream}-rel", 0, 0.3, 1.0)))
+
+
+def _aeolian(seed, stream, mood):
+    return (("partials", float(2 + int(rng.uniform(seed, f"{stream}-n", 0) * 5))),
+            # A low q is wind, a high q is a note. Sparse moods get the note.
+            ("q", 12.0 + (1.0 - mood.density) * 34.0),
+            ("attack", rng.between(seed, f"{stream}-att", 0, 0.35, 1.1)),
+            ("release", rng.between(seed, f"{stream}-rel", 0, 0.5, 1.6)))
+
+
 _PARAM_BUILDERS = {
     "sub": _sub, "additive": _additive, "pm": _pm, "pluck": _pluck, "noise": _noise,
     "bell": _bell, "mallet": _mallet, "tine": _tine, "glass": _glass, "chime": _chime,
     "formant": _formant, "reed": _reed, "brass": _brass, "choir": _choir, "flute": _flute,
     "pad": _pad, "string": _string, "organ": _organ, "supersaw": _supersaw, "drone": _drone,
     "granular": _granular, "wavetable": _wavetable, "feedback": _feedback, "chip": _chip,
+    "bowed": _bowed, "shimmer": _shimmer, "tape": _tape, "vox": _vox, "aeolian": _aeolian,
 }

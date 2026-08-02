@@ -32,6 +32,30 @@ from compex.generate.theory import Chord
 from compex.measure import Shape
 
 
+#: How far apart the spacing drive is allowed to push a voice, in octaves.
+SPREAD_LIMIT = (-1, 2)
+PITCH_RANGE = (24.0, 102.0)
+
+
+def spread(voices: list[VoiceSpec], spacing: float) -> dict[str, int]:
+    """Octave offsets that move the voices out of each other's register.
+
+    This is the composer's answer to a crowded mix, and it is a different
+    answer from the mixer's: the mixer can only make a thick voice louder,
+    while moving two lines an octave apart makes them two lines. Ordered by
+    where each voice naturally sits, then spread around the middle.
+    """
+    if not voices:
+        return {}
+    ordered = sorted(voices, key=lambda voice: (voice.octave, voice.voice_id))
+    centre = (len(ordered) - 1) / 2.0
+    low, high = SPREAD_LIMIT
+    return {
+        voice.voice_id: max(low, min(high, int(round((index - centre) * spacing))))
+        for index, voice in enumerate(ordered)
+    }
+
+
 @dataclass(frozen=True)
 class Written:
     """One movement's worth of music, and what the composer learned writing it."""
@@ -107,6 +131,7 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
     end = origin + movement.beats
     chord_index = 0
     cursor = origin
+    spacing = spread(voices, drives.spacing)
 
     while cursor < end - 1e-6:
         chord = progression[chord_index % len(progression)]
@@ -116,13 +141,15 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                 written, lineage, heard, approach, ledger, choice = _lead(
                     seed, index, chord_index, voice, chord, scale, root_pitch,
                     cursor, span, movement, motif, drives, taste, lineage, heard,
-                    approach, ledger, position, past, vocabulary, past_cost)
+                    approach, ledger, position, past, vocabulary, past_cost,
+                    spacing.get(voice.voice_id, 0))
                 notes.extend(written)
                 if choice is not None:
                     choices.append(choice)
                 continue
             notes.extend(_voice_notes(seed, index, chord_index, voice, chord, scale,
-                                      root_pitch, cursor, span, movement, patterns, drives))
+                                      root_pitch, cursor, span, movement, patterns, drives,
+                                      spacing.get(voice.voice_id, 0)))
         cursor += span
         chord_index += 1
 
@@ -152,7 +179,7 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
 
 def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span,
           movement, motif, drives, taste, lineage, heard, approach, ledger,
-          position=0.0, past=(), vocabulary=(), past_cost=()):
+          position=0.0, past=(), vocabulary=(), past_cost=(), octave=0):
     """Choose a phrase for this chord and write it out.
 
     The choosing happens in scale degrees, which is why it can be judged before
@@ -187,7 +214,7 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
                            at_beat=start)
     phrase = melody.voiced(choice.chosen, drives)
 
-    base = root_pitch + 12 * voice.octave
+    base = root_pitch + 12 * (voice.octave + octave)
     velocity = _clamp(0.35 + 0.65 * movement.energy, 0.08, 1.0)
 
     notes: list[Note] = []
@@ -196,7 +223,7 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
     for position, (step, length) in enumerate(zip(phrase.steps, phrase.rhythm)):
         if offset >= span:
             break
-        pitch = float(base + theory.degree_semitone(scale, chord.degree + step))
+        pitch = _in_range(float(base + theory.degree_semitone(scale, chord.degree + step)))
         played = position
         notes.append(Note(
             start=start + offset,
@@ -230,16 +257,16 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
 # ── everything that is not the tune ───────────────────────────────────────
 
 def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pitch,
-                 start, span, movement, patterns, drives) -> list[Note]:
+                 start, span, movement, patterns, drives, octave=0) -> list[Note]:
     stream = f"{voice.voice_id}-{movement_index}-{chord_index}"
-    base = root_pitch + 12 * voice.octave
+    base = root_pitch + 12 * (voice.octave + octave)
     velocity = _clamp(0.35 + 0.65 * movement.energy, 0.08, 1.0)
 
     if voice.role == ROLE_PAD:
         pitches = [base + step for step in chord.semitones(scale)]
         return [
-            Note(start=start, duration=span, pitch=float(pitch), velocity=velocity * 0.7,
-                 voice=voice.voice_id)
+            Note(start=start, duration=span, pitch=_in_range(float(pitch)),
+                 velocity=velocity * 0.7, voice=voice.voice_id)
             for pitch in pitches
         ]
 
@@ -250,7 +277,7 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
     if voice.role == ROLE_TEXTURE:
         if rng.uniform(seed, f"{stream}-t", 0) > 0.35 + movement.energy * 0.4:
             return []
-        pitch = float(base + theory.degree_semitone(scale, chord.degree + 4))
+        pitch = _in_range(float(base + theory.degree_semitone(scale, chord.degree + 4)))
         return [Note(start=start, duration=span * 0.9, pitch=pitch,
                      velocity=velocity * 0.55, voice=voice.voice_id)]
 
@@ -266,7 +293,7 @@ def _bass(seed, stream, voice, chord, scale, base, start, span, movement,
     way the kick's is, and the interlock criterion has already made sure the two
     are not fighting for the same slots.
     """
-    root = float(base + theory.degree_semitone(scale, chord.degree))
+    root = _in_range(float(base + theory.degree_semitone(scale, chord.degree)))
     if figure is None:
         return [Note(start=start, duration=min(1.0, span), pitch=root,
                      velocity=velocity, voice=voice.voice_id)]
@@ -278,7 +305,7 @@ def _bass(seed, stream, voice, chord, scale, base, start, span, movement,
         # Anything off the strong slots gets the fifth instead, which is what a
         # bass player does when they want movement without leaving the chord.
         degree = chord.degree if level > 0.6 else chord.degree + 4
-        pitch = float(base + theory.degree_semitone(scale, degree))
+        pitch = _in_range(float(base + theory.degree_semitone(scale, degree)))
         notes.append(Note(
             start=beat,
             duration=min(figure.subdivision * 1.5, span - offset),
@@ -312,6 +339,21 @@ def _pull_toward_centre(notes: list[Note], drives: Drives, seed: int,
         return notes
     shift = -12.0 * (1 if distance > 0 else -1)
     return [replace(note, pitch=note.pitch + shift) for note in notes]
+
+
+def _in_range(pitch: float) -> float:
+    """Fold a pitch back inside the range the engines are built for.
+
+    Spacing can push a voice off the end of the keyboard, and an engine asked
+    for a 12 Hz fundamental does not fail — it just makes something nobody can
+    hear, which is worse.
+    """
+    low, high = PITCH_RANGE
+    while pitch < low:
+        pitch += 12.0
+    while pitch > high:
+        pitch -= 12.0
+    return pitch
 
 
 def _clamp(value: float, low: float, high: float) -> float:
