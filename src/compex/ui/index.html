@@ -33,6 +33,13 @@
       <input type="range" id="k-duration" min="15" max="600" step="5" value="90">
     </div>
 
+    <div class="knob" id="ghost-knob">
+      <div class="knob-top"><span class="name">ghosts</span><span class="val" id="v-ghost">—</span></div>
+      <input type="range" id="k-ghost" min="0" max="1" step="0.05" value="0.35">
+      <span class="hint">how loudly the lines it decided against are heard under the ones that
+        won — 0 is the engine without them</span>
+    </div>
+
     <div class="row">
       <label>save as</label>
       <div id="formats" class="radios"></div>
@@ -90,6 +97,14 @@
      already playing, whether it reads as a figure. After every movement the grid moves
      toward whatever it actually played, so a slot it keeps choosing ends up weighing more
      than the meter ever gave it.</p>
+
+  <h3 class="sub">The lines it decided against</h3>
+  <div id="ghosts" class="ghosts"></div>
+  <p class="note">Every phrase you hear beat two to six others. They are scored, and now they are
+     played — quietly, underneath, at a level set by how close they came. When the composer was
+     sure, the texture is clean; when it was genuinely torn, the line blooms into a haze of what it
+     nearly played instead. A line that would have settled something the piece owes is heard louder
+     than its score alone earns.</p>
 
   <h3 class="sub">The mix it decided on</h3>
   <div id="mix" class="mixrows"></div>

@@ -27,6 +27,7 @@ KNOB_RANGES: dict[str, tuple[float, float]] = {
     "seed": (0, 2**31 - 1),
     "duration_s": (8.0, 900.0),
     "master_gain": (0.05, 1.0),
+    "ghost_gain": (0.0, 1.0),
 }
 
 
@@ -41,6 +42,10 @@ class Knobs:
     seed: int = 1203
     duration_s: float = 90.0
     master_gain: float = 0.89
+    #: How loudly the lines the composer decided against are heard underneath
+    #: the ones that beat them. Zero is the engine without ghosts, and the
+    #: audio is byte-identical to the build before they existed.
+    ghost_gain: float = 0.35
 
     def with_(self, **changes: Any) -> "Knobs":
         return replace(self, **changes)

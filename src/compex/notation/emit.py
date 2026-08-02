@@ -32,6 +32,7 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         *_melody(composition),
         *_ledger(composition),
         *_hindsight(composition),
+        *_ghosts(composition),
         *_evolution(composition),
     ]
     return "\n\n".join(block for block in blocks if block)
@@ -236,6 +237,35 @@ def _hindsight(composition: Composition) -> list[str]:
         f"\\Delta={reveal.saved:.0f}\\ ({reveal.share * 100:.0f}\\%"
         "\\mathrm{\\ of\\ the\\ opening\\ explained\\ by\\ the\\ ending})"
     ]
+
+
+def _ghosts(composition: Composition) -> list[str]:
+    """The lines it decided against, and how close each came.
+
+    The formula has always been able to say what the piece played. This is the
+    first line in it that says what the piece *nearly* played, which is the
+    only part of the machinery a listener could not otherwise reconstruct.
+    """
+    haunted = [choice for choice in composition.melodies if choice.ghosts]
+    if not haunted:
+        return []
+
+    turned_down = sum(len(choice.ghosts) for choice in haunted)
+    torn = sum(ghost.closeness() for choice in haunted for ghost in choice.ghosts)
+    lines = [
+        "\\mathrm{GHOSTS}:\\ "
+        f"{turned_down}\\mathrm{{\\ lines\\ turned\\ down}},\\ "
+        f"{len(composition.ghosts)}\\mathrm{{\\ notes\\ sounded}},\\ "
+        f"\\bar\\gamma={torn / max(1, turned_down):.3f}"
+    ]
+    for choice in haunted:
+        nearly = ",\\ ".join(
+            f"\\mathrm{{{ghost.phrase.origin}}}\\,e^{{-{ghost.margin:.3f}}}"
+            f"\\!=\\!{ghost.closeness():.2f}"
+            for ghost in choice.ghosts)
+        lines.append(
+            f"\\Gamma_{{{choice.movement}}}@{choice.at_beat:g}=\\left\\{{{nearly}\\right\\}}")
+    return lines
 
 
 def _evolution(composition: Composition) -> list[str]:

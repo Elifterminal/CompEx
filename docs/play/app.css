@@ -164,6 +164,13 @@ pre {
         border: 1px solid var(--line); }
 .obar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 
+/* ghosts */
+.ghosts { display: grid; gap: 4px; margin-bottom: 10px; }
+.ghostrow { display: grid; grid-template-columns: 96px 1fr 52px; gap: 8px; align-items: center;
+            font-size: 12px; }
+.gbar { height: 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.gbar i { display: block; height: 100%; border-radius: 999px; background: var(--accent-2); }
+
 /* the mix */
 .mixrows { display: grid; gap: 4px; margin-bottom: 10px; }
 .mixrow { display: grid; grid-template-columns: 104px 1fr 58px; gap: 8px; align-items: center;

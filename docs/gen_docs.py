@@ -162,6 +162,9 @@ HINDSIGHT_SECONDS = 300.0
 MIX_THEMES = ("serene", "wistful", "hypnotic", "solemn", "menacing", "frantic")
 MIX_SECONDS = 120.0
 
+GHOST_THEMES = ("serene", "wistful", "hypnotic", "menacing", "frantic")
+GHOST_SECONDS = 180.0
+
 #: Measured on the build before the mixer existed, seed 7788, two minutes each.
 #: Kept as numbers rather than as a memory of them, because the whole claim is
 #: that this was arithmetic and not taste.
@@ -186,6 +189,28 @@ def _crowding_at(spacing: float) -> float:
             measured.append(analyse(piece.notes, piece.strokes, piece.motif, piece.scale,
                                     piece.root_pitch, piece.total_beats, lead).crowding)
     return statistics.mean(measured)
+
+
+def ghost_survey() -> dict:
+    """How torn the composer actually was, across a spread of moods."""
+    pieces = [compose(7788, GHOST_SECONDS, THEMES[name]) for name in GHOST_THEMES]
+    every = [(ghost, choice, piece)
+             for piece in pieces for choice in piece.melodies for ghost in choice.ghosts]
+    closeness = [ghost.closeness() for ghost, _, _ in every]
+
+    return {
+        "pieces": pieces,
+        "example": pieces[GHOST_THEMES.index("hypnotic")],
+        "turned_down": len(every),
+        "notes": sum(len(piece.ghosts) for piece in pieces),
+        "played": sum(len(piece.notes) for piece in pieces),
+        "torn": statistics.mean(closeness) if closeness else 0.0,
+        "near_ties": sum(1 for value in closeness if value > 0.9),
+        "routs": sum(1 for value in closeness if value < 0.1),
+        "closest": min((ghost.margin for ghost, _, _ in every), default=0.0),
+        "loudest": sorted(every, key=lambda row: row[0].margin)[:6],
+        "themes": len(GHOST_THEMES),
+    }
 
 
 def mix_survey() -> dict:
@@ -1363,6 +1388,93 @@ the gross errors, but 9% for a pad rather than 12% is a judgement nobody has arg
 """
 
 
+def panel_ghosts(survey) -> str:
+    from compex.dsp.arrange import GHOST_CUTOFF
+    from compex.generate.melody import GHOSTS_KEPT
+    from compex.generate.write import GHOST_OWED_BOOST
+
+    example = survey["example"]
+    nearest = "".join(
+        f"<tr><td><code>{ghost.phrase.origin}</code></td>"
+        f"<td class='sub'>lost to {choice.chosen.origin}</td>"
+        f"<td>{ghost.margin:.4f}</td><td>{ghost.closeness():.2f}</td>"
+        f"<td class='sub'>{piece.mood.nearest_theme()} @ beat {choice.at_beat:g}</td></tr>"
+        for ghost, choice, piece in survey["loudest"])
+
+    rows = "".join(
+        f"<tr><td><b>{piece.mood.nearest_theme()}</b></td>"
+        f"<td>{len(piece.melodies)}</td>"
+        f"<td>{sum(len(c.ghosts) for c in piece.melodies)}</td>"
+        f"<td>{len(piece.ghosts)}</td>"
+        f"<td>{statistics.mean([g.closeness() for c in piece.melodies for g in c.ghosts]) if any(c.ghosts for c in piece.melodies) else 0:.2f}</td></tr>"
+        for piece in survey["pieces"])
+
+    return f"""
+<h2 style="margin-top:26px">The ghosts</h2>
+<p class="sub">The mechanism the project is named for, and the last thing on it that was designed
+and not built.</p>
+
+<div class="read"><b>Computational Expressionism was supposed to mean this:</b> that the machine's
+way of arriving at something becomes perceptible — that you can <i>hear</i> the machinery rather
+than only its output. Until now you could not. The composer auditioned two to six lines for every
+phrase, played one, and the rest vanished without a sound. The only evidence a choice had happened
+was that something had been chosen.</div>
+
+<p>Now the losers are played. Quietly, underneath the line that beat them, through the same
+instrument — a ghost is the same voice playing what it nearly played, not a different voice
+commenting on it — with the top taken off at {GHOST_CUTOFF:.0f}&nbsp;Hz so they sit
+<i>behind</i> rather than compete. Up to {GHOSTS_KEPT} per audition.</p>
+
+<div class="read ok"><b>How loud a ghost is says how close the decision was.</b>
+<code>closeness = e<sup>-margin &times; 6</sup></code>. A field the composer nearly split leaves an
+audible haze of almost-melodies; a decision it was sure about leaves almost nothing. So a passage
+where the machine was certain sounds clean, and a passage where it was torn blooms — and that
+difference is not a metaphor for its uncertainty, it <i>is</i> its uncertainty, scaled.</div>
+
+<div class="grid">
+<div class="stat"><div class="n">{survey['turned_down']}</div><div class="k">lines turned down</div></div>
+<div class="stat"><div class="n">{survey['notes']}</div><div class="k">ghost notes sounded</div></div>
+<div class="stat"><div class="n">{survey['torn']:.2f}</div><div class="k">average closeness</div></div>
+<div class="stat"><div class="n">{survey['near_ties']}</div><div class="k">near ties (heard at 90%+)</div></div>
+<div class="stat"><div class="n">{survey['closest']:.4f}</div>
+  <div class="k">closest call in the sample</div></div>
+<div class="stat"><div class="n">{survey['notes'] / max(1, survey['played']) * 100:.0f}%</div>
+  <div class="k">as many notes as the piece plays</div></div>
+</div>
+
+<p class="sub">Measured over {survey['themes']} pieces of {GHOST_SECONDS:.0f} seconds, seed 7788.</p>
+<table><thead><tr><th>theme</th><th>auditions</th><th>turned down</th><th>ghost notes</th>
+<th>average closeness</th></tr></thead><tbody>{rows}</tbody></table>
+
+<h3>One more rule, and it is the one worth arguing with</h3>
+<div class="read"><b>A ghost that would have settled something the piece owes is heard
+{GHOST_OWED_BOOST:g}&times; louder than its score earns.</b> That line is not merely a road not
+taken — it is the piece declining to do something it is carrying. The ledger already knows what is
+outstanding; this is where the two mechanisms meet, and it is why the haze thickens exactly where
+the music is avoiding a resolution it has set up.</div>
+
+<h3>The closest calls in the sample</h3>
+<table><thead><tr><th>ghost</th><th>outcome</th><th>margin</th><th>heard at</th><th>where</th>
+</tr></thead><tbody>{nearest}</tbody></table>
+
+<h3>The switch</h3>
+<p>The <code>ghosts</code> knob on both surfaces runs 0 to 1, and at 0 the engine produces the
+music it produced before ghosts existed — checked byte for byte against the previous build, not
+asserted. That matters more here than anywhere else in the project: a mechanism claiming to make
+the machine's inner state audible is exactly the kind of thing that can sound profound and do
+nothing.</p>
+
+<div class="q"><b>Open: whether this reads as uncertainty or as reverb.</b> The intended experience
+is hearing the machine hesitate. The risk is that a haze of near-misses under a line is simply
+heard as ambience, in which case the mechanism is honest and the perception is wrong — which would
+be worth knowing, and only a listener can say.</div>
+
+<div class="q"><b>Open: only melodic auditions have ghosts.</b> The rhythm auditions turn down
+candidates too, and a rejected pattern is at least as interesting as a rejected phrase. Nothing
+plays them yet.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -1373,15 +1485,9 @@ all hand-assigned by me. The measurements prove they are <i>consistent</i> — t
 reliably reaches the same region — but consistency is not correctness. Whether "menacing" sounds
 menacing is an open question that only a listener settles.</div>
 
-<div class="q"><b>It is not yet Computational Expressionism, by its own definition.</b> The idea
-this project is named for is that a machine's way of constructing reality should become
-perceptible — that you should be able to <i>hear</i> the machinery, not just its output. The
-composer now genuinely chooses: every phrase beats a field of alternatives, and every one of those
-alternatives is scored and thrown away silently. The intended mechanism is a <b>ghost layer</b>:
-play the runners-up quietly underneath at a gain set by how close they came, so a confident
-passage is clean and a torn one blooms into a haze of almost-melodies. Everything it needs now
-exists — the candidates, the scores, and a reason to prefer one ghost over another (the loser that
-<i>would</i> have settled an outstanding promise). The knob still does nothing.</div>
+<div class="read ok"><b>The thing it is named for is built.</b> See <b>The ghosts</b>. Every
+phrase you hear beat two to six others; those losers are now played, quietly, underneath, at a
+level set by how close they came. What was uncertainty inside the machine is a sound.</div>
 
 <div class="q"><b>Intention is still only a ledger.</b> The piece carries obligations and can be
 measured on how much of its opening the ending explained. What it does not have is a plan: target
@@ -1461,6 +1567,7 @@ def build() -> str:
     purpose = purpose_survey()
     hindsight = hindsight_survey()
     mixing = mix_survey()
+    haunting = ghost_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -1524,9 +1631,11 @@ carrying it has become part of what the piece is.</div>
 <div class="read"><b>And it can make its own beginning intelligible.</b> The opening is priced in
 symbols twice — as it could have been written at the time, and knowing how the piece ends — so
 "the ending explained the beginning" is a measured number rather than a claim.</div>
-<div class="read warn"><b>It is not finished, in a specific way.</b> The thing the project is
-named for — making the machine's own uncertainty audible — is designed but not built. What exists
-today is a composer that works; what it is aiming at is something stranger.</div>
+<div class="read ok"><b>And you can hear it being unsure.</b> Every phrase beat two to six others
+in an audition; the lines it turned down are played quietly underneath, at a level set by how close
+they came. When it was certain the texture is clean; when it was torn the line blooms into a haze
+of what it nearly played. That was the thing the project was named for and the last piece of it
+that was designed and not built.</div>
 </div>
 
 <nav class="tabs">
@@ -1537,6 +1646,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <button class="tab" data-panel="choose">Choosing, not reciting</button>
 <button class="tab" data-panel="purpose">What is it for?</button>
 <button class="tab" data-panel="mix">The mix</button>
+<button class="tab" data-panel="ghosts">The ghosts</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
@@ -1549,6 +1659,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <div class="panel" id="choose">{panel_choose(choices)}</div>
 <div class="panel" id="purpose">{panel_purpose(purpose, hindsight)}</div>
 <div class="panel" id="mix">{panel_mix(mixing)}</div>
+<div class="panel" id="ghosts">{panel_ghosts(haunting)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

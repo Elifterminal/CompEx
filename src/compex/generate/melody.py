@@ -26,6 +26,7 @@ in bar one, it will, and the record says so.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 
 from compex import rng
@@ -42,6 +43,11 @@ from compex.measure import Shape
 #: audition collapses to a recital again — which is the switch that makes the
 #: whole idea falsifiable.
 CANDIDATES_MIN, CANDIDATES_MAX = 2, 7
+
+#: How many losing lines are kept so they can be heard under the winner. The
+#: rest are counted and discarded — keeping every candidate of every audition
+#: would store more phrases than the piece contains.
+GHOSTS_KEPT = 3
 
 LEAP_DEGREES = 2      # a move of more than this many scale degrees is a leap
 LATE = 0.55           # before this far through a piece, revealing has nothing to reveal
@@ -231,6 +237,28 @@ class Taste:
 
 
 @dataclass(frozen=True)
+class Ghost:
+    """A line that was imagined, judged, and not played.
+
+    Kept rather than discarded because how close it came is a real fact about
+    the piece — the audible form of the composer being torn — and it is the
+    only thing that can carry it.
+    """
+
+    phrase: Phrase
+    score: float
+    margin: float      # how far behind the winner it finished
+
+    def closeness(self, sharpness: float = 6.0) -> float:
+        """How loudly this deserves to be heard, 0..1.
+
+        Exponential in the gap, so a field the composer nearly split leaves an
+        audible haze and a decision it was sure about leaves almost nothing.
+        """
+        return float(math.exp(-max(0.0, self.margin) * sharpness))
+
+
+@dataclass(frozen=True)
 class Choice:
     """One audition: what was imagined, what won, and by how much."""
 
@@ -241,6 +269,7 @@ class Choice:
     scores: tuple[tuple[str, float], ...]      # the winner's criterion by criterion
     rejected: tuple[tuple[str, float], ...]    # origin and score of everything else
     considered: int
+    ghosts: tuple[Ghost, ...] = ()             # the nearest losers, kept to be heard
 
     @property
     def margin(self) -> float:
@@ -302,6 +331,9 @@ def choose(seed: int, movement: int, index: int, setting: Setting, taste: Taste,
     # candidate — deterministic, and the earlier ones are the lineage.
     winner, criteria, score = max(scored, key=lambda row: row[2])
 
+    losers = sorted((row for row in scored if row[0] is not winner),
+                    key=lambda row: -row[2])[:GHOSTS_KEPT]
+
     return Choice(
         movement=movement,
         at_beat=at_beat,
@@ -311,6 +343,8 @@ def choose(seed: int, movement: int, index: int, setting: Setting, taste: Taste,
         rejected=tuple((phrase.origin, value)
                        for phrase, _, value in scored if phrase is not winner),
         considered=len(scored),
+        ghosts=tuple(Ghost(phrase=phrase, score=value, margin=score - value)
+                     for phrase, _, value in losers),
     )
 
 

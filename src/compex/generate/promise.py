@@ -303,6 +303,12 @@ def would_settle(promise: Promise, steps: tuple[int, ...], chord_degree: int) ->
     return False
 
 
+def would_settle_any(owed: tuple[Promise, ...], steps: tuple[int, ...],
+                     chord_degree: int) -> bool:
+    """Would this line answer anything currently outstanding?"""
+    return any(would_settle(promise, steps, chord_degree) for promise in owed)
+
+
 def pattern_settles(promise: Promise, slots: tuple[float, ...], subdivision: float) -> bool:
     """Would this candidate pattern land the beat a syncopation displaced?"""
     if promise.domain != "metre" or not slots:

@@ -20,10 +20,17 @@ from compex.config import SAMPLE_RATE
 from compex.dsp import balance, drums, effects, engines, filters, fx
 from compex.generate.compose import Composition
 from compex.generate.palette import ROLE_PAD, ROLE_PERC, VoiceSpec
+from compex.generate.write import GHOST_MARK
 
 TAIL_SECONDS = 3.5
 REFERENCE_KIT = 3.0    # the kit size the per-drum gains were written for
 MIN_KIT_TRIM = 0.45
+
+#: Ghosts are lowpassed before they are mixed in. Not for tidiness — a line
+#: with its top taken off is heard as *behind* the one that beat it rather than
+#: as a second line competing with it, which is the difference between a haze
+#: and a mess.
+GHOST_CUTOFF = 1800.0
 VARIANTS = 3           # one-shot variants per voice, cycled so repeats still vary
 DUCK_DEPTH = 0.42
 DUCK_RELEASE = 0.055
@@ -77,10 +84,18 @@ def survey(composition: Composition, sample_rate: int = SAMPLE_RATE) -> balance.
 
 
 def render_composition(composition: Composition, master_gain: float = 0.89,
-                       progress: ProgressFn = None) -> np.ndarray:
-    """Render ``composition`` to mono float samples in ``[-1, 1]``."""
+                       progress: ProgressFn = None,
+                       ghost_gain: float = 0.0) -> np.ndarray:
+    """Render ``composition`` to mono float samples in ``[-1, 1]``.
+
+    ``ghost_gain`` is how loudly the lines the composer decided against are
+    heard under the ones that beat them. Zero is the engine as it was before
+    the ghosts existed.
+    """
     if not 0.0 < master_gain <= 1.0:
         raise ValueError(f"master_gain must be in (0, 1], got {master_gain}")
+    if not 0.0 <= ghost_gain <= 1.0:
+        raise ValueError(f"ghost_gain must be in [0, 1], got {ghost_gain}")
 
     seconds_per_beat = composition.seconds_per_beat
     total = int((composition.total_seconds + TAIL_SECONDS) * SAMPLE_RATE)
@@ -97,6 +112,10 @@ def render_composition(composition: Composition, master_gain: float = 0.89,
 
     _report(progress, 0.80, f"placing {len(composition.strokes)} strokes")
     _render_strokes(percussion, composition, seconds_per_beat, mix.trims())
+
+    if ghost_gain > 0 and composition.ghosts:
+        _report(progress, 0.86, f"{len(composition.ghosts)} notes it decided against")
+        melodic += _render_ghosts(total, composition, seconds_per_beat) * ghost_gain
 
     _report(progress, 0.90, "ducking against the kick")
     melodic *= _sidechain(total, composition, seconds_per_beat)
@@ -180,6 +199,39 @@ def _render_strokes(bus: np.ndarray, composition: Composition,
         _add_at(bus, sample * stroke.velocity * spec.gain * trim
                 * (trims or {}).get(stroke.voice, 1.0),
                 _sample_at(stroke.start, seconds_per_beat))
+
+
+def _render_ghosts(total: int, composition: Composition,
+                   seconds_per_beat: float) -> np.ndarray:
+    """Render the lines that lost their auditions, on their own bus.
+
+    They use the voice that beat them — same engine, same character — because
+    a ghost is the same instrument playing what it nearly played, not a
+    different instrument commenting on it.
+    """
+    bus = np.zeros(total, dtype=np.float64)
+    specs = {voice.voice_id: voice for voice in composition.voices}
+
+    grouped: dict[str, list] = {}
+    for note in composition.ghosts:
+        grouped.setdefault(note.voice, []).append(note)
+
+    for voice_id, notes in grouped.items():
+        spec = specs.get(voice_id.replace(GHOST_MARK, ""))
+        if spec is None:
+            continue
+        cache: dict[tuple, np.ndarray] = {}
+        for order, note in enumerate(notes):
+            count = _note_samples(spec, note.duration, seconds_per_beat)
+            key = (round(note.pitch, 2), count, order % VARIANTS)
+            sample = cache.get(key)
+            if sample is None:
+                sample = engines.render_note(spec, _hz(note.pitch), count, SAMPLE_RATE,
+                                             composition.seed, order % VARIANTS)
+                cache[key] = sample
+            _add_at(bus, sample * note.velocity, _sample_at(note.start, seconds_per_beat))
+
+    return filters.lowpass(bus, SAMPLE_RATE, GHOST_CUTOFF, order=2)
 
 
 def _sidechain(total: int, composition: Composition, seconds_per_beat: float) -> np.ndarray:

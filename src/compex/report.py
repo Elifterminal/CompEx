@@ -199,6 +199,31 @@ def mix(decided) -> dict:
     }
 
 
+def ghosts(composition: Composition, gain: float = 0.0) -> dict:
+    """The lines the composer decided against, and how loudly they are heard."""
+    spb = composition.seconds_per_beat
+    per_choice = [choice for choice in composition.melodies if choice.ghosts]
+    closest = sorted(
+        ((ghost, choice) for choice in per_choice for ghost in choice.ghosts),
+        key=lambda pair: pair[0].margin)[:8]
+
+    return {
+        "gain": round(gain, 3),
+        "notes": len(composition.ghosts),
+        "auditions": len(per_choice),
+        "turned_down": sum(len(choice.ghosts) for choice in per_choice),
+        "loudest": [{"at": round(choice.at_beat * spb, 2),
+                     "origin": ghost.phrase.origin,
+                     "margin": round(ghost.margin, 4),
+                     "heard_at": round(ghost.closeness(), 3),
+                     "beaten_by": choice.chosen.origin}
+                    for ghost, choice in closest],
+        "torn": round(sum(ghost.closeness() for choice in per_choice
+                          for ghost in choice.ghosts)
+                      / max(1, sum(len(choice.ghosts) for choice in per_choice)), 3),
+    }
+
+
 def taste(composition: Composition) -> dict:
     """What the composer listens for now, against what it started out listening for."""
     now, start = composition.taste, composition.opening_taste

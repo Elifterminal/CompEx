@@ -19,6 +19,7 @@ async function boot() {
     setStatus("could not reach the engine — is the server still running?", "err");
   }
   wireRuntime();
+  wireGhosts();
 }
 
 function buildThemes() {
@@ -67,6 +68,16 @@ function buildFormats(formats) {
     input.addEventListener("change", () => { state.format = input.value; });
   }
   state.format = formats[0];
+}
+
+function wireGhosts() {
+  const input = $("k-ghost");
+  const show = () => {
+    const value = Number(input.value);
+    $("v-ghost").textContent = value === 0 ? "off" : value.toFixed(2);
+  };
+  input.addEventListener("input", show);
+  show();
 }
 
 function wireRuntime() {
@@ -194,11 +205,29 @@ function drawChoices(data) {
     : "";
 
   $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  drawGhosts(data.ghosts);
   drawMix(data.mix);
   drawHindsight(data.hindsight);
   drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
+}
+
+function drawGhosts(ghosts) {
+  const host = $("ghosts");
+  if (!ghosts || !ghosts.notes) {
+    host.innerHTML = `<p class="note">no ghosts — either it was never torn, or they are switched off</p>`;
+    return;
+  }
+  const rows = ghosts.loudest.map((g) => `
+    <div class="ghostrow">
+      <code>${g.origin}</code>
+      <span class="gbar"><i style="width:${Math.min(100, g.heard_at * 100)}%"></i></span>
+      <span class="note">${g.at}s · lost to ${g.beaten_by} by ${g.margin}</span>
+    </div>`).join("");
+  host.innerHTML = `<div class="note">${ghosts.notes} notes it decided against, from
+    ${ghosts.turned_down} lines turned down across ${ghosts.auditions} auditions ·
+    average closeness ${ghosts.torn} · played at ${ghosts.gain}</div>${rows}`;
 }
 
 function drawMix(mix) {
@@ -360,7 +389,8 @@ async function makeTrack() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        knobs: { seed: Number($("seed").value), duration_s: seconds },
+        knobs: { seed: Number($("seed").value), duration_s: seconds,
+                 ghost_gain: Number($("k-ghost").value) },
         mood: state.mood,
         format: state.format,
       }),

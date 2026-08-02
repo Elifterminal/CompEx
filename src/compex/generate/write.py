@@ -32,6 +32,12 @@ from compex.generate.theory import Chord
 from compex.measure import Shape
 
 
+#: What marks a note as a ghost — a line the composer imagined, judged, and
+#: decided against. The renderer strips this to find the voice it belongs to.
+GHOST_MARK = "~ghost"
+GHOST_VELOCITY = 0.8      # how loud a ghost is against the line that beat it
+GHOST_OWED_BOOST = 1.5    # a ghost that would have settled a debt is worth hearing
+
 #: How far apart the spacing drive is allowed to push a voice, in octaves.
 SPREAD_LIMIT = (-1, 2)
 PITCH_RANGE = (24.0, 102.0)
@@ -67,6 +73,7 @@ class Written:
     heard: frozenset[tuple[int, int]]
     approach: int | None = None   # the scale degree the last phrase ended on
     ledger: Ledger = Ledger()     # what the piece owes after writing this
+    ghosts: tuple[Note, ...] = ()  # the lines it decided against, kept to be heard
 
 
 def choose_patterns(seed: int, index: int, movement: Movement, grids: dict[str, Grid],
@@ -127,6 +134,7 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
     notes: list[Note] = []
     strokes: list[Stroke] = []
     choices: list[Choice] = []
+    ghosts: list[Note] = []
 
     end = origin + movement.beats
     chord_index = 0
@@ -138,12 +146,13 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
         span = min(chord_beats, end - cursor)
         for voice in voices:
             if voice.role == ROLE_LEAD:
-                written, lineage, heard, approach, ledger, choice = _lead(
+                written, lineage, heard, approach, ledger, choice, haze = _lead(
                     seed, index, chord_index, voice, chord, scale, root_pitch,
                     cursor, span, movement, motif, drives, taste, lineage, heard,
                     approach, ledger, position, past, vocabulary, past_cost,
                     spacing.get(voice.voice_id, 0))
                 notes.extend(written)
+                ghosts.extend(haze)
                 if choice is not None:
                     choices.append(choice)
                 continue
@@ -172,7 +181,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
             ))
 
     return Written(notes=tuple(notes), strokes=tuple(strokes), choices=tuple(choices),
-                   lineage=lineage, heard=heard, approach=approach, ledger=ledger)
+                   lineage=lineage, heard=heard, approach=approach, ledger=ledger,
+                   ghosts=tuple(ghosts))
 
 
 # ── the lead: audition, then play the winner ──────────────────────────────
@@ -190,7 +200,7 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
     stream = f"{voice.voice_id}-{index}-{chord_index}"
     rest_gate = 0.22 + movement.energy * 0.72 * drives.density_bias
     if rng.uniform(seed, f"{stream}-rest", 0) > rest_gate:
-        return [], lineage, heard, approach, ledger, None
+        return [], lineage, heard, approach, ledger, None, []
 
     setting = Setting(
         scale=scale,
@@ -236,6 +246,11 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
         offset += length
 
     notes = _pull_toward_centre(notes, drives, seed, stream)
+    # Judged against the ledger as it stood when the audition happened, not
+    # after this phrase has paid anything: what the losers *would* have settled
+    # is a fact about the moment the choice was made.
+    haze = _ghosts(choice, voice, chord, scale, base, start, span, velocity, drives, ledger)
+
     # The ledger moves in the same order the music does: what this phrase
     # answered is settled, and only then does what it opened go on the books.
     for owed in ledger.live(start, domain="pitch"):
@@ -251,7 +266,49 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
     # step into itself. The lineage stays unvoiced — mutations work on the idea,
     # not on the copy the register drives happened to make of it.
     landed = chord.degree + phrase.steps[played] if notes else approach
-    return notes, choice.chosen, heard, landed, ledger, choice
+    return notes, choice.chosen, heard, landed, ledger, choice, haze
+
+
+def _ghosts(choice: Choice, voice: VoiceSpec, chord: Chord, scale, base: int,
+            start: float, span: float, velocity: float, drives: Drives,
+            ledger: Ledger) -> list[Note]:
+    """Write out the lines the composer decided against, quietly.
+
+    This is the thing the project is named for. Every phrase you hear beat two
+    to six others; until now those were scored and thrown away, so the only
+    audible trace of the machine having *had* a choice was that a choice had
+    been made. Playing the runners-up underneath, at a level set by how close
+    they came, makes the deciding itself audible: when the composer was sure,
+    the texture is clean, and when it was genuinely torn, the line blooms into
+    a haze of the things it nearly played instead.
+
+    A loser that would have settled an outstanding promise is heard louder than
+    its score alone earns. That one is not merely a road not taken — it is the
+    piece declining to do something it owes, and that is worth hearing.
+    """
+    haze: list[Note] = []
+    for ghost in choice.ghosts:
+        level = ghost.closeness()
+        if promise.would_settle_any(ledger.live(start, domain="pitch"),
+                                    ghost.phrase.steps, chord.degree):
+            level = min(1.0, level * GHOST_OWED_BOOST)
+        if level < 0.02:
+            continue
+
+        spoken = melody.voiced(ghost.phrase, drives)
+        offset = 0.0
+        for step, length in zip(spoken.steps, spoken.rhythm):
+            if offset >= span:
+                break
+            haze.append(Note(
+                start=start + offset,
+                duration=min(length, span - offset),
+                pitch=_in_range(float(base + theory.degree_semitone(scale, chord.degree + step))),
+                velocity=_clamp(velocity * level * GHOST_VELOCITY, 0.02, 1.0),
+                voice=f"{voice.voice_id}{GHOST_MARK}",
+            ))
+            offset += length
+    return haze
 
 
 # ── everything that is not the tune ───────────────────────────────────────

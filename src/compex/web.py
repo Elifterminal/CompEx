@@ -31,7 +31,7 @@ class Session:
 
     def __init__(self, seed: int, duration_s: float, mood: dict | str | None,
                  span_seconds: float = DEFAULT_SPAN_SECONDS,
-                 master_gain: float = 0.89) -> None:
+                 master_gain: float = 0.89, ghost_gain: float = 0.35) -> None:
         self.composition = compose(int(seed), float(duration_s), Mood.parse(mood))
         self.spans = plan(self.composition, float(span_seconds))
         # Once for the piece, not once per span: the balance is a property of
@@ -39,6 +39,7 @@ class Session:
         # drift between the start of a track and the end of it.
         self.mix = survey(self.composition)
         self.master_gain = float(master_gain)
+        self.ghost_gain = max(0.0, min(1.0, float(ghost_gain)))
         self._carry: np.ndarray | None = None
         self._level: Level | None = None
         self._position = 0
@@ -73,6 +74,7 @@ class Session:
             "patterns": report.patterns(self.composition),
             "taste": report.taste(self.composition),
             "ledger": report.ledger(self.composition),
+            "ghosts": report.ghosts(self.composition, self.ghost_gain),
             "mix": report.mix(self.mix),
             "hindsight": report.hindsight(self.composition),
         }
@@ -97,7 +99,7 @@ class Session:
         span = self.spans[self._position]
         samples, self._carry, self._level = render_span(
             self.composition, span, self._carry, self.master_gain, self._level,
-            self.mix.trims())
+            self.mix.trims(), self.ghost_gain)
         self._position += 1
         return {
             "index": span.index,
@@ -138,11 +140,12 @@ _samples: np.ndarray | None = None
 
 
 def start(seed: int, duration_s: float, mood_json: str,
-          span_seconds: float = DEFAULT_SPAN_SECONDS) -> str:
+          span_seconds: float = DEFAULT_SPAN_SECONDS, ghost_gain: float = 0.35) -> str:
     """Begin a piece. Returns its description as JSON."""
     global _session, _samples
     _samples = None
-    _session = Session(seed, duration_s, json.loads(mood_json), span_seconds)
+    _session = Session(seed, duration_s, json.loads(mood_json), span_seconds,
+                       ghost_gain=ghost_gain)
     return json.dumps(_session.info())
 
 

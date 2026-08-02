@@ -104,6 +104,7 @@ class Composition:
     voices: tuple[VoiceSpec, ...]
     notes: tuple[Note, ...]
     strokes: tuple[Stroke, ...]
+    ghosts: tuple[Note, ...] = ()
     evolution: tuple[Evolution, ...] = ()
     final_drives: Drives = Drives()
     melodies: tuple[Choice, ...] = ()
@@ -177,6 +178,7 @@ class Composition:
             f"taste moved on: {', '.join(strayed) if strayed else 'nothing'}"
             f" · {moved} rhythm grid(s) past their starting weights",
             f"promises: {self.ledger.summary(self.total_beats)}",
+            f"ghosts: {len(self.ghosts)} notes it decided against, kept audible",
             f"hindsight: {self.reveal.describe() if self.reveal else 'not measured'}",
             f"evolved: {corrections} corrections over {len(self.evolution)} listen-backs, "
             f"plasticity {self.final_drives.plasticity:.2f}",
@@ -218,6 +220,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
 
     notes: list[Note] = []
     strokes: list[Stroke] = []
+    ghosts: list[Note] = []
     history: list[Evolution] = []
     melodies: list[Choice] = []
     patterns: list[PatternChoice] = []
@@ -281,6 +284,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         )
         notes.extend(written.notes)
         strokes.extend(written.strokes)
+        ghosts.extend(written.ghosts)
         melodies.extend(written.choices)
         shapes.extend(_shape_of(choice) for choice in written.choices)
         lineage, heard, approach = written.lineage, written.heard, written.approach
@@ -295,13 +299,14 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
 
     notes.sort(key=lambda note: (note.start, note.voice))
     strokes.sort(key=lambda stroke: (stroke.start, stroke.voice))
+    ghosts.sort(key=lambda note: (note.start, note.voice))
 
     return Composition(
         seed=seed, mood=mood, bpm=bpm, beats_per_bar=beats_per_bar, root_pitch=root_pitch,
         scale_name=scale_name, scale=scale, archetype=archetype, progression=progression,
         chord_beats=chord_beats, motif=motif, movements=movements,
         voices=tuple(voices) + kit,
-        notes=tuple(notes), strokes=tuple(strokes),
+        notes=tuple(notes), strokes=tuple(strokes), ghosts=tuple(ghosts),
         evolution=tuple(history), final_drives=drives,
         melodies=tuple(melodies), patterns=tuple(patterns),
         grids=tuple(grids.values()), retunings=tuple(retunings),

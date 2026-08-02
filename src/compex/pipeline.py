@@ -63,7 +63,8 @@ class RenderResult:
 def make_track(knobs: Knobs, mood: Mood, progress: ProgressFn = None) -> RenderResult:
     """Invent a piece for these settings and render it."""
     composition = compose(knobs.seed, knobs.duration_s, mood)
-    samples = render_composition(composition, knobs.master_gain, progress=progress)
+    samples = render_composition(composition, knobs.master_gain, progress=progress,
+                                 ghost_gain=knobs.ghost_gain)
     return RenderResult(
         samples=samples,
         composition=composition,

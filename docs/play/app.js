@@ -112,6 +112,14 @@ function wireDuration() {
   const show = () => { $("v-duration").textContent = clock(Number(input.value)); };
   input.addEventListener("input", show);
   show();
+
+  const ghost = $("ghost");
+  const showGhost = () => {
+    const value = Number(ghost.value);
+    $("v-ghost").textContent = value === 0 ? "off" : value.toFixed(2);
+  };
+  ghost.addEventListener("input", showGhost);
+  showGhost();
 }
 
 const clock = (s) => `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, "0")}s`;
@@ -141,7 +149,8 @@ async function play() {
 
   let info;
   try {
-    info = JSON.parse(state.web.start(seed, seconds, JSON.stringify(state.mood), 8.0));
+    info = JSON.parse(state.web.start(seed, seconds, JSON.stringify(state.mood), 8.0,
+                                      Number($("ghost").value)));
   } catch (err) {
     console.error(err);
     setStatus(`could not compose: ${err.message || err}`, "err");
@@ -296,6 +305,16 @@ function drawChoices(info) {
       <div class="cells">${cells}</div>
     </div>`;
   }).join("");
+
+  const ghosts = info.ghosts;
+  if (ghosts && ghosts.notes) {
+    $("ghosts").innerHTML = `<h3 class="mini">what it decided against</h3>
+      <div class="hint">${ghosts.notes} notes from ${ghosts.turned_down} lines turned down ·
+        average closeness ${ghosts.torn}</div>` + ghosts.loudest.slice(0, 5).map((g) => `
+      <div class="ghostrow"><b>${g.origin}</b>
+        <span class="gbar"><i style="width:${Math.min(100, g.heard_at * 100)}%"></i></span>
+        <span class="hint">${g.margin}</span></div>`).join("");
+  }
 
   const mix = info.mix;
   if (mix && mix.voices.length) {

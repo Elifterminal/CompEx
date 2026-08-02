@@ -29,6 +29,7 @@ from compex.dsp import arrange, drums, effects, engines, filters, fx
 from compex.dsp.arrange import (
     DUCK_DEPTH,
     DUCK_RELEASE,
+    GHOST_CUTOFF,
     TAIL_SECONDS,
     VARIANTS,
     _note_samples,
@@ -36,6 +37,7 @@ from compex.dsp.arrange import (
 )
 from compex.generate.compose import Composition
 from compex.generate.palette import ROLE_PERC
+from compex.generate.write import GHOST_MARK
 from compex.generate.theory import midi_to_hz
 
 DEFAULT_SPAN_SECONDS = 8.0
@@ -114,7 +116,7 @@ def plan(composition: Composition, span_seconds: float = DEFAULT_SPAN_SECONDS) -
 
 def render_span(composition: Composition, span: Span, carry: np.ndarray | None = None,
                 master_gain: float = 0.89, level: Level | None = None,
-                trims: dict[str, float] | None = None
+                trims: dict[str, float] | None = None, ghost_gain: float = 0.0
                 ) -> tuple[np.ndarray, np.ndarray, Level]:
     """Render one span. Returns its samples, the overhang, and the level state.
 
@@ -140,6 +142,8 @@ def render_span(composition: Composition, span: Span, carry: np.ndarray | None =
     if trims is None:
         trims = arrange.survey(composition).trims()
     _voices_in_span(melodic, composition, span, seconds_per_beat, total, trims)
+    if ghost_gain > 0 and composition.ghosts:
+        melodic += _ghosts_in_span(composition, span, seconds_per_beat, total) * ghost_gain
     _strokes_in_span(percussion, composition, span, seconds_per_beat, total, trims)
     melodic *= _duck(total, composition, span, seconds_per_beat)
 
@@ -204,6 +208,41 @@ def _voices_in_span(bus, composition, span, seconds_per_beat, total, trims=None)
         if spec.effects:
             scratch = effects.apply_chain(scratch, SAMPLE_RATE, spec.effects)
         bus += scratch * spec.gain * (trims or {}).get(voice_id, 1.0)
+
+
+def _ghosts_in_span(composition, span, seconds_per_beat, total) -> np.ndarray:
+    """The lines it decided against, for one span, on their own bus.
+
+    Kept identical to the offline path deliberately — a phone that hears a
+    different set of ghosts from the desktop is the drift this project keeps
+    testing against.
+    """
+    specs = {v.voice_id: v for v in composition.voices}
+    bus = np.zeros(total, dtype=np.float64)
+
+    grouped: dict[str, list] = {}
+    for note in composition.ghosts:
+        if span.start_beat <= note.start < span.end_beat:
+            grouped.setdefault(note.voice, []).append(note)
+
+    for voice_id, notes in grouped.items():
+        spec = specs.get(voice_id.replace(GHOST_MARK, ""))
+        if spec is None:
+            continue
+        cache: dict[tuple, np.ndarray] = {}
+        for order, note in enumerate(notes):
+            count = _note_samples(spec, note.duration, seconds_per_beat)
+            variant = order % VARIANTS
+            key = (round(note.pitch, 2), count, variant)
+            sample = cache.get(key)
+            if sample is None:
+                sample = engines.render_note(spec, midi_to_hz(note.pitch), count,
+                                             SAMPLE_RATE, composition.seed, variant)
+                cache[key] = sample
+            _add_at(bus, sample * note.velocity,
+                    _offset(note.start, span.start_beat, seconds_per_beat))
+
+    return filters.lowpass(bus, SAMPLE_RATE, GHOST_CUTOFF, order=2)
 
 
 def _strokes_in_span(bus, composition, span, seconds_per_beat, total, trims=None) -> None:
