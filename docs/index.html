@@ -355,11 +355,19 @@ kit is drawn from whatever sits near the mood. That fix has a story attached; se
 Reverb and delay are feedback structures, computed a delay line at a time so each block depends
 only on the previous one — that keeps them in numpy instead of a per-sample Python loop.</p>
 
-<div class="read"><b>Every voice leaves its engine at the same peak level.</b> That sounds like
-housekeeping and is not. Measured across the 29 engines, natural output level
-spanned roughly 300&times; in RMS — a self-oscillating resonance came out fifty times quieter than
-a plain sine. Without normalising, the composer's per-voice gain means something different for
-every engine, and the quiet ones are simply absent from the mix.</div>
+<div class="read"><b>Every voice leaves its engine at the same <i>loudness</i>.</b> That sounds
+like housekeeping and is not. Measured across the 29 engines, natural output
+level spanned roughly 300&times; in RMS — a self-oscillating resonance came out fifty times
+quieter than a plain sine. Without levelling, the composer's per-voice gain means something
+different for every engine and the quiet ones are simply absent.</div>
+
+<div class="read warn"><b>This used to level by peak, and that was its own bug.</b> Peak is how
+tall a sound is. A swelling pad and a plucked string reach the same height and nothing like the
+same volume, so the pads carrying the body of the piece were a third of what they looked — which
+is what a listener heard before any number said it. Now it is the loudness of the loudest
+quarter-second, with partial credit still given to the peak, because a transient <i>is</i> heard
+as louder than its RMS and matching pure loudness makes plucks vanish the other way. See
+<b>The mix</b>.</div>
 </div>
 <div class="panel" id="evolve">
 <h2 style="margin-top:26px">How it changes its mind</h2>
@@ -782,13 +790,22 @@ menacing is an open question that only a listener settles.</div>
 
 <div class="q"><b>It is not yet Computational Expressionism, by its own definition.</b> The idea
 this project is named for is that a machine's way of constructing reality should become
-perceptible — that you should be able to <i>hear</i> the machinery, not just its output. Right
-now the composer picks one continuation and the alternatives vanish silently. The intended
-mechanism is a <b>ghost layer</b>: score several candidate continuations, and play the
-runners-up quietly underneath at a gain set by how close they came. When the machine is
-confident, the texture is clean; when it is genuinely torn, it blooms into a haze of
-almost-melodies. That would make uncertainty audible as texture. The knob exists and does
-nothing.</div>
+perceptible — that you should be able to <i>hear</i> the machinery, not just its output. The
+composer now genuinely chooses: every phrase beats a field of alternatives, and every one of those
+alternatives is scored and thrown away silently. The intended mechanism is a <b>ghost layer</b>:
+play the runners-up quietly underneath at a gain set by how close they came, so a confident
+passage is clean and a torn one blooms into a haze of almost-melodies. Everything it needs now
+exists — the candidates, the scores, and a reason to prefer one ghost over another (the loser that
+<i>would</i> have settled an outstanding promise). The knob still does nothing.</div>
+
+<div class="q"><b>Intention is still only a ledger.</b> The piece carries obligations and can be
+measured on how much of its opening the ending explained. What it does not have is a plan: target
+curves for its own unrest, promise pressure and decision margin, and an intent that swaps itself
+out once it becomes too easy to satisfy. Designed, not built.</div>
+
+<div class="q"><b>The composer cannot hear the mix.</b> It answers for register crowding, which it
+can reason about while writing. The spectral question — is my pad fighting my texture for one
+band — is measured only after rendering, by a stage the critic never meets.</div>
 
 <div class="q"><b>Determinism has no regression test across versions.</b> The tests check that two
 renders in the same process match. They cannot catch a DSP change that silently alters every
@@ -817,6 +834,23 @@ quieter than intended before a sweep across all engines caught it.</div>
 <b>anvil in a serene piece</b>. Kits are now ranked against a character table like everything
 else. The general lesson — anything the composer picks from has to know what its members sound
 like — is now a project rule.</div>
+
+<div class="retract"><s><b>Levelling every voice to the same peak.</b></s> The fix for one
+audibility problem became the cause of the next: peak is not loudness, and the pads went quiet.
+Two builds and a listening session apart. Closing a risk with a constant can open the following
+one silently — the test asserted the spread stayed tight, and it did, in the units that turned out
+not to matter.</div>
+
+<div class="retract"><s><b>Deciding which engines could be pads by writing a list.</b></s> Measured
+later: <b>40% of that list did not sustain a note</b>. Bells and glasses dying under a harmony
+that was still moving, which is why sustained voices all sounded alike and why the music read as
+percussive even after the drums were fixed. Membership of a role is now a measured behaviour with
+a test that regenerates it.</div>
+
+<div class="retract"><s><b>Judging a phrase and then playing a different one.</b></s> The register
+drives stretched and clamped the winner <i>after</i> the audition had scored it, and the
+"bring the line home" rule dropped unanswered twelfths into lines just judged for their leaps. If
+a stage transforms what a judge scored, the judgement is about something else.</div>
 
 <div class="retract"><s><b>The equation normaliser stripped <code>\right</code> before
 <code>\rightarrow</code>.</b></s> Rule-ordering bug that silently collapsed every arrow chain
