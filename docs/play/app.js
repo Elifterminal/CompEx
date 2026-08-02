@@ -297,6 +297,19 @@ function drawChoices(info) {
     </div>`;
   }).join("");
 
+  const ledger = info.ledger;
+  if (ledger) {
+    const carrying = ledger.carrying
+      ? `<div class="carrying"><b>carrying a ${ledger.carrying.kind}</b>
+          <span class="hint">for ${Math.round(ledger.carrying.seconds)}s</span></div>` : "";
+    const open = [...ledger.open].sort((a, b) => b.pressure - a.pressure).slice(0, 6).map((o) => `
+      <div class="owed"><b>${o.kind}</b>
+        <span class="obar"><i style="width:${Math.min(100, o.pressure * 100)}%"></i></span>
+        <span class="hint">${o.domain}</span></div>`).join("");
+    $("ledger").innerHTML = `<h3 class="mini">what it owes</h3>${carrying}
+      <div class="hint">${ledger.open.length} open · ${ledger.paid.length} settled</div>${open}`;
+  }
+
   if (taste) {
     $("taste").innerHTML = taste.criteria.map((c) => `
       <div class="weight${c.moved ? " moved" : ""}">

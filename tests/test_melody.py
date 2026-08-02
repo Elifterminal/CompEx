@@ -149,9 +149,10 @@ class ChoosingTests(unittest.TestCase):
 
 class LearningTests(unittest.TestCase):
     def test_every_taught_criterion_exists(self):
-        for principle, (criterion, polarity) in TAUGHT_BY.items():
-            self.assertIn(criterion, CRITERIA, principle)
-            self.assertIn(polarity, (-1, 1), principle)
+        for principle, taught in TAUGHT_BY.items():
+            for criterion, polarity in taught:
+                self.assertIn(criterion, CRITERIA, principle)
+                self.assertIn(polarity, (-1, 1), principle)
         named = {p.name for p in PRINCIPLES}
         for principle in TAUGHT_BY:
             self.assertIn(principle, named)
@@ -165,6 +166,22 @@ class LearningTests(unittest.TestCase):
         self.assertGreater(moved.answer, taste.answer)
         self.assertGreater(moved.kinship, taste.kinship)
         self.assertTrue(any(s.criterion == "answer" for s in shifts))
+
+    def test_one_principle_can_teach_more_than_one_criterion(self):
+        """Unanswered leaps want the phrase to answer them *and* the ledger to remember them."""
+        taste = Taste()
+        bad = Analysis(200, 100, 0.45, 0.45, 0.0, 1.0, 12.0, 0.3, 0.4, 0.5)
+        moved, _ = retune(taste, taste, judge(bad, THEMES["wistful"]), (),
+                          Drives(plasticity=1.0))
+        self.assertGreater(moved.answer, taste.answer)
+        self.assertGreater(moved.promise, taste.promise)
+
+    def test_a_criterion_switched_off_cannot_be_revived_by_teaching(self):
+        taste = Taste(promise=0.0)
+        bad = Analysis(200, 100, 0.45, 0.45, 0.0, 1.0, 12.0, 0.3, 0.4, 0.5)
+        moved, _ = retune(taste, taste, judge(bad, THEMES["wistful"]), (),
+                          Drives(plasticity=1.0))
+        self.assertEqual(moved.promise, 0.0)
 
     def test_weights_can_end_up_past_where_they_started(self):
         start = initial_taste(THEMES["serene"])

@@ -125,6 +125,37 @@ def patterns(composition: Composition) -> list[dict]:
     return out
 
 
+def ledger(composition: Composition) -> dict:
+    """What the piece owes, what it settled, and what it is still carrying."""
+    book = composition.ledger
+    now = composition.total_beats
+    spb = composition.seconds_per_beat
+    deepest = book.deepest(now)
+
+    return {
+        "open": [{"kind": owed.kind,
+                  "domain": owed.domain,
+                  "opened": round(owed.opened_at * spb, 2),
+                  "strength": round(owed.strength, 3),
+                  "pressure": round(owed.pressure(now), 3),
+                  "carried": round((now - owed.opened_at) * spb, 2)}
+                 for owed in book.live(now)],
+        "paid": [{"kind": settled.promise.kind,
+                  "domain": settled.promise.domain,
+                  "opened": round(settled.promise.opened_at * spb, 2),
+                  "settled": round(settled.at_beat * spb, 2),
+                  "waited": round(settled.waited * spb, 2),
+                  "how": settled.how}
+                 for settled in book.paid],
+        "pressure": round(book.pressure(now), 3),
+        "carrying": ({"kind": deepest.kind,
+                      "domain": deepest.domain,
+                      "beats": round(now - deepest.opened_at, 2),
+                      "seconds": round((now - deepest.opened_at) * spb, 2)}
+                     if deepest else None),
+    }
+
+
 def taste(composition: Composition) -> dict:
     """What the composer listens for now, against what it started out listening for."""
     now, start = composition.taste, composition.opening_taste

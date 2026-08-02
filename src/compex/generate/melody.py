@@ -29,9 +29,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from compex import rng
+from compex.generate import promise
 from compex.generate.critic import ROUGHNESS, Verdict
 from compex.generate.evolve import Drives
 from compex.generate.mood import Mood
+from compex.generate.promise import Ledger
 from compex.generate.theory import Motif, degree_semitone
 
 #: How many lines it will imagine before choosing one. Set both to 1 and the
@@ -45,18 +47,29 @@ TASTE_BOUNDS = (0.02, 3.20)   # hard limits on a weight — not where it starts,
 LEARN_RATE = 0.22     # how fast a complaint moves the weight behind it
 TRUST_RATE = 0.05     # how fast a criterion that keeps deciding auditions earns weight
 
-#: Which criterion each aesthetic principle teaches, and which way.
+#: Which criteria each aesthetic principle teaches, and which way.
 #: +1 means "this principle reading below its band wants that criterion to
 #: matter more". The critic is the teacher; this is the syllabus.
-TAUGHT_BY: dict[str, tuple[str, int]] = {
-    "post_skip_reversal": ("answer", +1),
-    "motif_presence": ("kinship", +1),
-    "novelty": ("freshness", +1),
-    "repetition": ("freshness", -1),
-    "register_spread": ("span", +1),
-    "dissonance": ("colour", -1),
-    "density": ("gait", +1),
-    "tessitura_drift": ("shape", +1),
+#:
+#: Post-skip reversal teaches two, deliberately. Answering a leap inside the
+#: phrase and answering one three phrases later are the same complaint at
+#: different timescales, and the ledger is what makes the second possible.
+#: Repetition teaches the promise weight *down*, and that pairing is the whole
+#: reason the ledger does not run away with the piece: settling a debt means
+#: returning to material the line has already been near, so a composer that
+#: cares only about paying its debts becomes self-similar. One principle pushes
+#: the weight up when leaps go unanswered, another pushes it down when the
+#: answering has made the music repeat itself. The intent lives in the argument
+#: between them.
+TAUGHT_BY: dict[str, tuple[tuple[str, int], ...]] = {
+    "post_skip_reversal": (("answer", +1), ("promise", +1)),
+    "motif_presence": (("kinship", +1),),
+    "novelty": (("freshness", +1),),
+    "repetition": (("freshness", -1), ("promise", -1)),
+    "register_spread": (("span", +1),),
+    "dissonance": (("colour", -1),),
+    "density": (("gait", +1),),
+    "tessitura_drift": (("shape", +1),),
 }
 
 @dataclass(frozen=True)
@@ -117,6 +130,12 @@ CRITERIA_DETAIL: tuple[Criterion, ...] = (
         "Whether it fills the slot it was given without running past the chord change, at a "
         "note rate the movement's energy actually wants.",
     ),
+    Criterion(
+        "promise", "Meyer's expectation, carried",
+        "What it does about everything the piece has left hanging. Settling a ripe obligation "
+        "scores highest, carrying one scores next, and settling one nobody is waiting for yet "
+        "scores worst — which is what 'too obvious' means once it has a number.",
+    ),
 )
 
 CRITERIA: tuple[str, ...] = tuple(criterion.name for criterion in CRITERIA_DETAIL)
@@ -157,6 +176,8 @@ class Setting:
     germ: tuple[int, ...] = ()                      # the germ's contour, direction only
     heard: frozenset[tuple[int, int]] = frozenset()  # interval pairs already played
     approach: int | None = None                     # scale degree the last phrase ended on
+    ledger: Ledger = Ledger()                       # what the piece owes so far
+    now_beat: float = 0.0                           # where we are, for judging maturity
 
     def chord_tones(self) -> frozenset[int]:
         """The chord's own degrees, folded into one octave of the scale."""
@@ -177,6 +198,7 @@ class Taste:
     span: float = 0.7
     cadence: float = 0.8
     gait: float = 0.9
+    promise: float = 1.0
     curiosity: float = 0.5   # not a criterion — how many lines it bothers to imagine
 
     def weights(self) -> tuple[tuple[str, float], ...]:
@@ -234,6 +256,10 @@ def initial_taste(mood: Mood) -> Taste:
         span=0.35 + mood.energy * 0.85,
         cadence=0.40 + (1.0 - mood.energy) * 0.75,
         gait=0.45 + mood.density * 0.85,
+        # A weight of zero drops the criterion out of the audition entirely
+        # rather than sitting in it as a constant, so switching the ledger off
+        # gives back exactly the music that existed before there was one.
+        promise=(0.35 + mood.tension * 0.60) if promise.ENABLED else 0.0,
         curiosity=0.30 + mood.tension * 0.45,
     )
 
@@ -326,11 +352,17 @@ def _how_many(taste: Taste, drives: Drives) -> int:
 
 
 def _total(criteria: dict[str, float], taste: Taste) -> float:
-    weights = dict(taste.weights())
+    """Weighted mean over the criteria that are switched on.
+
+    A weight of zero drops its criterion out of the average rather than
+    averaging in a constant, which is what makes an off switch mean *off*
+    instead of *quietly shifting every score*.
+    """
+    weights = {name: value for name, value in taste.weights() if value > 1e-9}
     total = sum(weights.values())
     if total <= 0:
         return 0.0
-    return sum(criteria[name] * weights[name] for name in CRITERIA) / total
+    return sum(criteria[name] * weight for name, weight in weights.items()) / total
 
 
 # ── making candidates ─────────────────────────────────────────────────────
@@ -483,6 +515,7 @@ def assess(phrase: Phrase, setting: Setting) -> dict[str, float]:
         "span": _span(phrase, setting),
         "cadence": _cadence(phrase, tones, span),
         "gait": _gait(phrase, setting),
+        "promise": _promise(phrase, setting),
     }
 
 
@@ -611,6 +644,29 @@ def _gait(phrase: Phrase, setting: Setting) -> float:
     return max(0.0, (0.45 * fill + 0.55 * fit) - overrun * 0.5)
 
 
+def _promise(phrase: Phrase, setting: Setting) -> float:
+    """What this candidate does about everything still hanging.
+
+    The ordering that matters — settling early is worse than carrying, which
+    is worse than settling something ripe — lives in
+    :func:`compex.generate.promise.credit`, so the melodic and rhythmic sides
+    cannot disagree about what "too soon" means.
+    """
+    live = setting.ledger.live(setting.now_beat, domain="pitch")
+    if not live:
+        return 0.5   # nothing owed. Not a virtue and not a failing
+
+    best, ripening = 0.0, 0.0
+    settling = False
+    for owed in live:
+        maturity = owed.maturity(setting.now_beat)
+        ripening = max(ripening, maturity)
+        if promise.would_settle(owed, phrase.steps, setting.chord_degree):
+            settling = True
+            best = max(best, maturity)
+    return promise.credit(best, settling, ripening)
+
+
 # ── taste moving ──────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -649,18 +705,17 @@ def retune(taste: Taste, start: Taste, verdicts: tuple[Verdict, ...],
     for verdict in verdicts:
         if verdict.satisfied:
             continue
-        taught = TAUGHT_BY.get(verdict.principle.name)
-        if taught is None:
-            continue
-        criterion, polarity = taught
-        delta = polarity * (-verdict.error) * LEARN_RATE * drives.plasticity
-        before = values[criterion]
-        after = max(low, min(high, before + delta))
-        if abs(after - before) < 1e-4:
-            continue
-        values[criterion] = after
-        shifts.append(Shift(criterion, before, after, verdict.principle.attribution,
-                            _past(after, getattr(start, criterion))))
+        for criterion, polarity in TAUGHT_BY.get(verdict.principle.name, ()):
+            before = values[criterion]
+            if before <= 1e-9:
+                continue   # a criterion switched off stays off; teaching cannot revive it
+            delta = polarity * (-verdict.error) * LEARN_RATE * drives.plasticity
+            after = max(low, min(high, before + delta))
+            if abs(after - before) < 1e-4:
+                continue
+            values[criterion] = after
+            shifts.append(Shift(criterion, before, after, verdict.principle.attribution,
+                                _past(after, getattr(start, criterion))))
 
     # The trust channel only opens when the piece is going well. Reinforcing
     # whatever is deciding auditions during a bad stretch would teach the
@@ -668,6 +723,8 @@ def retune(taste: Taste, start: Taste, verdicts: tuple[Verdict, ...],
     if choices and drives.unrest < 0.30:
         for criterion, weight in _deciding(choices).items():
             before = values[criterion]
+            if before <= 1e-9:
+                continue
             after = max(low, min(high, before + weight * TRUST_RATE))
             if abs(after - before) < 1e-4:
                 continue

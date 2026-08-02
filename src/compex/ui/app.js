@@ -194,8 +194,44 @@ function drawChoices(data) {
     : "";
 
   $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
+}
+
+function drawLedger(ledger) {
+  const host = $("ledger");
+  if (!ledger || (!ledger.open.length && !ledger.paid.length)) {
+    host.innerHTML = `<p class="note">nothing was left hanging in this one</p>`;
+    return;
+  }
+  const waits = ledger.paid.map((p) => p.waited).sort((a, b) => a - b);
+  const median = waits.length ? waits[Math.floor(waits.length / 2)] : 0;
+
+  const carrying = ledger.carrying
+    ? `<div class="carrying"><b>carrying a ${ledger.carrying.kind}</b>
+        <span class="note">for ${ledger.carrying.seconds}s — the deepest thing still unanswered</span></div>`
+    : "";
+
+  // Open first, and biggest first: what the piece has not done is the part you
+  // cannot hear by listening to what it did.
+  const open = [...ledger.open].sort((a, b) => b.pressure - a.pressure).map((owed) => `
+    <div class="owed">
+      <code>${owed.kind}</code>
+      <span class="obar"><i style="width:${Math.min(100, owed.pressure * 100)}%"></i></span>
+      <span class="note">${owed.domain} · opened ${owed.opened}s · carried ${owed.carried}s</span>
+    </div>`).join("");
+
+  const paid = ledger.paid.slice(-6).reverse().map((settled) => `
+    <div class="owed paid">
+      <code>${settled.kind}</code>
+      <span class="note">${settled.how}, ${settled.waited}s later</span>
+    </div>`).join("");
+
+  host.innerHTML = `${carrying}
+    <div class="note">${ledger.open.length} open · ${ledger.paid.length} settled ·
+      median wait ${median}s · total pressure ${ledger.pressure}</div>
+    ${open}${paid}`;
 }
 
 function drawFigure(pattern) {

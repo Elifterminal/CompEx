@@ -33,7 +33,12 @@ from compex.dsp.effects import EFFECT_NAMES                       # noqa: E402
 from compex.dsp.engines import ENGINE_NAMES                       # noqa: E402
 from compex.dsp.engines import core, struck, sustained, textural, voiced  # noqa: E402
 from compex.generate import THEMES, compose                       # noqa: E402
-from compex.generate.critic import PRINCIPLES                     # noqa: E402
+from compex.generate.critic import PRINCIPLES, analyse, judge     # noqa: E402
+from compex.generate.promise import (                             # noqa: E402
+    FORGET_BEATS,
+    RIPEN_BEATS,
+    RIPE,
+)
 from compex.generate.melody import CRITERIA_DETAIL as MELODY_CRITERIA  # noqa: E402
 from compex.generate.melody import MUTATIONS                      # noqa: E402
 from compex.generate.mood import AXES                             # noqa: E402
@@ -142,6 +147,54 @@ def choice_survey() -> dict:
         "grids": len(grids),
         "grids_past": sum(1 for grid in grids if grid.past_start()),
         "stray": statistics.mean([grid.strayed() for grid in grids] or [0.0]),
+    }
+
+
+PURPOSE_THEMES = ("serene", "hypnotic", "menacing", "frantic")
+PURPOSE_SECONDS = 240.0
+
+
+def purpose_survey() -> dict:
+    """Measure the ledger, and measure the piece with it switched off.
+
+    The off run is the whole falsification. If a mechanism that claims to give
+    a piece long-range intention leaves the music identical, it is decoration,
+    and this page should be the thing that says so.
+    """
+    from unittest.mock import patch
+
+    def run() -> list:
+        return [compose(2026, PURPOSE_SECONDS, THEMES[name]) for name in PURPOSE_THEMES]
+
+    def failing(piece) -> int:
+        lead = frozenset(v.voice_id for v in piece.voices if v.role == "lead")
+        analysis = analyse(piece.notes, piece.strokes, piece.motif, piece.scale,
+                           piece.root_pitch, piece.total_beats, lead)
+        return sum(1 for v in judge(analysis, piece.mood) if not v.satisfied)
+
+    on = run()
+    with patch("compex.generate.promise.ENABLED", False):
+        off = run()
+
+    settled = [s for piece in on for s in piece.ledger.paid]
+    waits = sorted(s.waited for s in settled)
+    carried = [piece.ledger.deepest(piece.total_beats) for piece in on]
+
+    return {
+        "pieces": on,
+        "example": on[PURPOSE_THEMES.index("menacing")],
+        "opened": sum(len(p.ledger.paid) + len(p.ledger.live(p.total_beats)) for p in on),
+        "settled": len(settled),
+        "kinds": Counter(s.promise.kind for s in settled),
+        "median_wait": waits[len(waits) // 2] if waits else 0.0,
+        "longest_wait": waits[-1] if waits else 0.0,
+        "still_open": sum(len(p.ledger.live(p.total_beats)) for p in on),
+        "carrying": [(p.mood.nearest_theme(), c.kind, round(p.total_beats - c.opened_at))
+                     for p, c in zip(on, carried) if c is not None],
+        "failing_on": sum(failing(p) for p in on),
+        "failing_off": sum(failing(p) for p in off),
+        "changed": sum(1 for a, b in zip(on, off) if a.notes != b.notes),
+        "themes": len(PURPOSE_THEMES),
     }
 
 
@@ -884,6 +937,125 @@ this needed now exists and the candidates now exist; what is missing is the mixi
 """
 
 
+def panel_purpose(survey) -> str:
+    piece = survey["example"]
+    now = piece.total_beats
+    kinds = "".join(
+        f"<tr><td><code>{kind}</code></td><td>{count}</td></tr>"
+        for kind, count in survey["kinds"].most_common())
+    carrying = "".join(
+        f"<span class='chip'>{theme}: a {kind}, {beats} beats</span>"
+        for theme, kind, beats in survey["carrying"])
+    open_now = "".join(
+        f"<tr><td><code>{owed.kind}</code></td><td class='sub'>{owed.domain}</td>"
+        f"<td class='sub'>opened at beat {owed.opened_at:g}</td>"
+        f"<td>{owed.pressure(now):.2f}</td></tr>"
+        for owed in sorted(piece.ledger.live(now), key=lambda p: -p.pressure(now))[:8])
+
+    return f"""
+<h2 style="margin-top:26px">What is it for?</h2>
+<p class="sub">The hardest question anyone has asked this project, and the part of the answer
+that is actually built.</p>
+
+<div class="read"><b>The question, as it was put:</b> a piece needs to be <i>for</i> something or
+it is only assembled — but the goal must not be a human one. Not happiness, not beauty, not
+tension-and-release because those are our words for it. <b>What would the computation want?</b></div>
+
+<h3>The move that made it buildable</h3>
+<p>Stop asking what the music is for and ask <b>what the machine can measure about itself</b>. It
+already has an interior in the only sense that matters here: unrest, plasticity, strain against
+its own bounds, how far its taste has travelled from where it started, and the margin by which
+each phrase beat the ones it turned down. Those are facts about the computation, not about a
+listener. An intention is a target shape for <i>those</i> over time.</p>
+
+<div class="read ok"><b>Build, drop, tension, release then stop being imported words.</b> "My
+confidence should collapse around here and recover by the end" produces a drop, audibly, without
+anyone having named a drop.</div>
+
+<h3>What melody is for, from the machine's side</h3>
+<p>Melody is the <b>continuity-bearing object</b> — the thing that can be displaced, inverted,
+fragmented, reharmonised and half-forgotten and still be recognisably itself. Which is the same
+claim as calling it the piece's compression dictionary, approached from the other end: identity
+through change is exactly what makes later material cheap to describe. It is not primarily the
+tune. It is the object that can accumulate history.</p>
+
+<h3>What got built: a ledger of what the music owes</h3>
+<p>Every gesture opens an account. A leap owes a step back the other way. A line that stops a
+semitone under a chord tone owes the note above it. A pattern that never lands the downbeat owes
+it. A progression that walks a long way round the circle of fifths owes a return or a reason.</p>
+
+<div class="read"><b>The load-bearing idea is maturity.</b> A promise is worth nothing the instant
+it opens, ripens over about {RIPEN_BEATS:g} beats until the ear is waiting for it, and fades after
+{FORGET_BEATS:g} because a debt nobody remembers is not a debt. Pressure is strength times
+maturity — and every question that sounded metaphorical falls out of that one curve.</div>
+
+<p>Including the one that mattered most. An early version of this design listed properties like
+<i>"whether satisfying it now would be too obvious"</i> and <i>"whether leaving it unresolved
+increases global coherence"</i> — the load-bearing ones, and the two with no number behind them.
+A property that cannot be computed from state the engine already holds is decoration, and
+decoration inside a control loop is worse than nothing because the trace still reads like
+reasoning. With maturity, <b>"too obvious" is just settling something below
+{RIPE:.2f} ripeness</b>, and the audition scores it accordingly:</p>
+
+<div class="read"><b>settling early &lt; carrying &lt; settling something ripe.</b> That ordering
+is the entire mechanism. Invert it and the composer pays every debt the moment it opens, which is
+what a solver does. This is the difference between wanting uncertainty gone and choosing which
+uncertainty is worth keeping.</div>
+
+<div class="grid">
+<div class="stat"><div class="n">{survey['opened']}</div><div class="k">obligations taken on</div></div>
+<div class="stat"><div class="n">{survey['settled']}</div><div class="k">settled</div></div>
+<div class="stat"><div class="n">{survey['median_wait']:.0f}</div><div class="k">median beats carried</div></div>
+<div class="stat"><div class="n">{survey['longest_wait']:.0f}</div><div class="k">longest wait before settling</div></div>
+<div class="stat"><div class="n">{survey['still_open']}</div><div class="k">deliberately left open</div></div>
+<div class="stat"><div class="n">{survey['changed']}/{survey['themes']}</div>
+  <div class="k">pieces the ledger changed</div></div>
+</div>
+
+<h3>What kinds of debt it actually takes on</h3>
+<table><thead><tr><th>kind</th><th>settled across the sample</th></tr></thead><tbody>{kinds}</tbody></table>
+<p class="sub">The deepest thing each sampled piece was still carrying at the end:</p>
+<p>{carrying or "<span class='sub'>nothing outstanding in this sample</span>"}</p>
+
+<h3>One piece's open book</h3>
+<p class="sub">Seed {piece.seed}, {piece.mood.nearest_theme()}, {PURPOSE_SECONDS:.0f} seconds —
+what it had not done by the end, biggest pressure first.</p>
+<table><thead><tr><th>owed</th><th>domain</th><th>since</th><th>pressure</th></tr></thead>
+<tbody>{open_now}</tbody></table>
+
+<h3>Does it do anything? The honest measurement</h3>
+<p>Switched off, the composer writes exactly the music it wrote before the ledger existed —
+checked <b>byte for byte</b> against the previous build. The criterion is dropped from the
+audition rather than sitting in it as a constant, which is what makes "off" mean off rather than
+"quietly shifting every score". Switched on, it changed {survey['changed']} of the
+{survey['themes']} sampled pieces.</p>
+
+<div class="read"><b>On the critic's own numbers it is a wash</b> — {survey['failing_on']} failing
+principles across the sample with the ledger on, {survey['failing_off']} with it off. That is the
+expected result and it is worth being clear about why: <b>no principle in the critic measures
+whether a forty-beat-old obligation was ever answered.</b> The ledger adds behaviour on a
+timescale nothing is currently listening at. Measuring the benefit needs the piece to be able to
+notice that its own past became simpler — which is the next thing on the list, not a thing that
+exists.</div>
+
+<div class="q"><b>Not built: intention as a trajectory.</b> The ledger gives the piece something to
+carry. It does not yet give it a plan for what to do with it — target curves for its own unrest,
+promise pressure and decision margin, with the weights it judges by moving to chase them, and the
+intent swapping itself out when it becomes too easy to satisfy.</div>
+
+<div class="q"><b>Not built: retroactive compression.</b> The most interesting form of resolution
+is not lowering tension but making earlier strangeness intelligible — five anomalies revealed as
+one pattern rotated five ways. This engine is unusually well placed to measure that, because the
+notation it writes is a real encoding that regenerates the audio: describe the first movement in
+the vocabulary available then, describe it again in the vocabulary the piece ends with, compare.
+Nothing does that yet.</div>
+
+<div class="q"><b>Not built: the ghosts, still.</b> The obvious job for them is now visible — play
+the losing candidate that <i>would</i> have settled a live promise, quietly, under the winner.
+Unpaid longing becomes audible as the thing the piece decided not to do.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -953,6 +1125,7 @@ def build() -> str:
     example = worked_example()
     series = evolution_survey()
     choices = choice_survey()
+    purpose = purpose_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -1009,6 +1182,10 @@ germ, the occasional line invented from nothing — and the winner becomes the p
 one. Rhythms work the same way, and the grid each voice plays against keeps moving toward
 whatever that voice actually chose. What it weighs those judgements by starts from the mood and
 is free to end up somewhere the starting weights never allowed.</div>
+<div class="read"><b>And it carries what it has not done yet.</b> Every gesture opens an
+account — a leap owes a step back, a progression that walks far from home owes a return — and the
+composer decides which of those to settle now, which to let ripen, and which to keep owing because
+carrying it has become part of what the piece is.</div>
 <div class="read warn"><b>It is not finished, in a specific way.</b> The thing the project is
 named for — making the machine's own uncertainty audible — is designed but not built. What exists
 today is a composer that works; what it is aiming at is something stranger.</div>
@@ -1020,6 +1197,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <button class="tab" data-panel="palette">The palette</button>
 <button class="tab" data-panel="evolve">How it changes its mind</button>
 <button class="tab" data-panel="choose">Choosing, not reciting</button>
+<button class="tab" data-panel="purpose">What is it for?</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
@@ -1030,6 +1208,7 @@ today is a composer that works; what it is aiming at is something stranger.</div
 <div class="panel" id="palette">{panel_palette(data)}</div>
 <div class="panel" id="evolve">{panel_evolve(series, example)}</div>
 <div class="panel" id="choose">{panel_choose(choices)}</div>
+<div class="panel" id="purpose">{panel_purpose(purpose)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

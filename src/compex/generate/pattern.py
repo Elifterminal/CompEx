@@ -33,9 +33,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from compex import rng
+from compex.generate import promise
 from compex.generate.critic import Verdict
 from compex.generate.evolve import Drives
 from compex.generate.mood import Mood
+from compex.generate.promise import Ledger
 
 CANDIDATES_MIN, CANDIDATES_MAX = 2, 6
 MAX_SLOTS = 32
@@ -85,6 +87,12 @@ CRITERIA_DETAIL: tuple[Criterion, ...] = (
         "continuity",
         "How close it stays to what this voice was doing before, against a target that loosens "
         "as the composer gets more unsettled.",
+    ),
+    Criterion(
+        "promise",
+        "Whether it lands the beat an earlier syncopation displaced, and whether that debt has "
+        "been outstanding long enough to be worth landing. Same ordering as the melodic side: "
+        "settling early is worse than carrying.",
     ),
 )
 
@@ -185,6 +193,7 @@ class Groove:
     interlock: float = 0.9
     figure: float = 0.9
     continuity: float = 0.8
+    promise: float = 0.9
 
     def weights(self) -> tuple[tuple[str, float], ...]:
         return tuple((name, getattr(self, name)) for name in CRITERIA)
@@ -227,6 +236,10 @@ def initial_groove(mood: Mood) -> Groove:
         interlock=0.50 + mood.density * 0.85,
         figure=0.45 + mood.energy * 0.80,
         continuity=0.35 + (1.0 - mood.energy) * 1.00,
+        # No principle in the critic measures metric obligation, so unlike the
+        # melodic weights this one has no teacher yet. It is derived from the
+        # mood and then holds — an honest gap rather than fake wiring.
+        promise=(0.40 + mood.tension * 0.75) if promise.ENABLED else 0.0,
     )
 
 
@@ -321,6 +334,8 @@ class Bed:
     tension: float
     drives: Drives
     bar_beats: float = 4.0
+    ledger: Ledger = Ledger()                 # what the piece owes so far
+    now_beat: float = 0.0                     # where we are, for judging maturity
     claimed: frozenset[float] = frozenset()   # positions in the bar other voices took
     previous: Pattern | None = None
 
@@ -427,11 +442,14 @@ def _mutate(parent: Pattern, seed: int, stream: str, slot: int, grid: Grid) -> P
 
 
 def _total(criteria: dict[str, float], groove: Groove) -> float:
-    weights = dict(groove.weights())
+    """Weighted mean over the criteria that are switched on — a zero weight
+    leaves its criterion out of the average rather than averaging in a
+    constant, so an off switch means off."""
+    weights = {name: value for name, value in groove.weights() if value > 1e-9}
     total = sum(weights.values())
     if total <= 0:
         return 0.0
-    return sum(criteria[name] * weights[name] for name in CRITERIA) / total
+    return sum(criteria[name] * weight for name, weight in weights.items()) / total
 
 
 # ── judging a pattern ─────────────────────────────────────────────────────
@@ -445,6 +463,7 @@ def assess(pattern: Pattern, grid: Grid, bed: Bed) -> dict[str, float]:
         "interlock": _interlock(pattern, bed),
         "figure": _figure(pattern),
         "continuity": _continuity(pattern, bed),
+        "promise": _promise(pattern, bed),
     }
 
 
@@ -488,6 +507,23 @@ def _interlock(pattern: Pattern, bed: Bed) -> float:
                      if in_bar(index * pattern.subdivision, bed.bar_beats) in bed.claimed)
     share = collisions / len(onsets)
     return 1.0 if share <= 0.34 else max(0.0, 1.0 - (share - 0.34) / 0.66)
+
+
+def _promise(pattern: Pattern, bed: Bed) -> float:
+    """What this pattern does about a beat an earlier syncopation displaced."""
+    live = bed.ledger.live(bed.now_beat, domain="metre")
+    if not live:
+        return 0.5
+
+    best, ripening = 0.0, 0.0
+    settling = False
+    for owed in live:
+        maturity = owed.maturity(bed.now_beat)
+        ripening = max(ripening, maturity)
+        if promise.pattern_settles(owed, pattern.slots, pattern.subdivision):
+            settling = True
+            best = max(best, maturity)
+    return promise.credit(best, settling, ripening)
 
 
 def in_bar(beat_offset: float, bar_beats: float) -> float:

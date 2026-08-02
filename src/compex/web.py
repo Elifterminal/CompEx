@@ -67,6 +67,7 @@ class Session:
             "melody": report.melody(self.composition),
             "patterns": report.patterns(self.composition),
             "taste": report.taste(self.composition),
+            "ledger": report.ledger(self.composition),
         }
 
     def evolution(self) -> list[dict]:

@@ -30,6 +30,7 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         *_patterns(composition),
         *_voices(composition),
         *_melody(composition),
+        *_ledger(composition),
         *_evolution(composition),
     ]
     return "\n\n".join(block for block in blocks if block)
@@ -171,6 +172,47 @@ def _melody(composition: Composition) -> list[str]:
             + ",\\ ".join(f"\\mathrm{{{grid.voice}}}({grid.past_start()}"
                           f"\\mathrm{{\\ slots}},\\ \\bar\\Delta{grid.strayed():.2f})"
                           for grid in moved)
+        )
+    return lines
+
+
+def _ledger(composition: Composition) -> list[str]:
+    """What the piece owed, what it paid, and what it decided to keep owing.
+
+    The unpaid line is the interesting one. Everything settled is audible in
+    the notes; what is still open at the end is the part of the piece that was
+    deliberately not finished, and there is nowhere else to read it.
+    """
+    ledger = composition.ledger
+    now = composition.total_beats
+    if not ledger.paid and not ledger.live(now):
+        return []
+
+    lines = [
+        "\\mathrm{OWED}:\\ "
+        f"{len(ledger.paid)}\\mathrm{{\\ settled}},\\ "
+        f"{len(ledger.live(now))}\\mathrm{{\\ still\\ open}},\\ "
+        f"\\Pi={ledger.pressure(now):.2f}\\mathrm{{\\ pressure}}"
+    ]
+
+    for settled in ledger.paid:
+        lines.append(
+            f"\\Omega_{{\\mathrm{{{settled.promise.kind}}}}}"
+            f"({settled.promise.opened_at:g}\\!\\rightarrow\\!{settled.at_beat:g})="
+            f"\\mathrm{{settled\\ after\\ }}{settled.waited:g}\\mathrm{{\\ beats}}"
+        )
+
+    for owed in ledger.live(now):
+        lines.append(
+            f"\\Omega_{{\\mathrm{{{owed.kind}}}}}({owed.opened_at:g})="
+            f"\\mathrm{{open}},\\ \\mathrm{{pressure}}\\,{owed.pressure(now):.2f}"
+        )
+
+    deepest = ledger.deepest(now)
+    if deepest is not None:
+        lines.append(
+            "\\mathrm{CARRIED}=\\mathrm{" + deepest.kind + "}\\ \\mathrm{for\\ }"
+            f"{now - deepest.opened_at:g}\\mathrm{{\\ beats}}"
         )
     return lines
 

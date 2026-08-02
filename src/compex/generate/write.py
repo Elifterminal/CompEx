@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from compex import rng
-from compex.generate import melody, pattern, theory
+from compex.generate import melody, pattern, promise, theory
 from compex.generate.evolve import Drives
 from compex.generate.material import Movement, Note, Stroke
 from compex.generate.melody import Choice, Phrase, Setting, Taste
@@ -27,6 +27,7 @@ from compex.generate.palette import (
     VoiceSpec,
 )
 from compex.generate.pattern import Bed, Grid, Pattern, PatternChoice
+from compex.generate.promise import Ledger
 from compex.generate.theory import Chord
 
 
@@ -40,12 +41,14 @@ class Written:
     lineage: Phrase | None
     heard: frozenset[tuple[int, int]]
     approach: int | None = None   # the scale degree the last phrase ended on
+    ledger: Ledger = Ledger()     # what the piece owes after writing this
 
 
 def choose_patterns(seed: int, index: int, movement: Movement, grids: dict[str, Grid],
                     groove: pattern.Groove, drives: Drives, bar_beats: float,
-                    previous: dict[str, Pattern]) -> tuple[dict[str, Pattern],
-                                                           tuple[PatternChoice, ...]]:
+                    previous: dict[str, Pattern], ledger: Ledger = Ledger(),
+                    at_beat: float = 0.0) -> tuple[dict[str, Pattern],
+                                                   tuple[PatternChoice, ...], Ledger]:
     """Hold an audition per voice, in a fixed order so each one hears the last.
 
     Order matters and it is deliberate: whoever goes first gets the obvious
@@ -64,14 +67,25 @@ def choose_patterns(seed: int, index: int, movement: Movement, grids: dict[str, 
             bar_beats=bar_beats,
             claimed=frozenset(claimed),
             previous=previous.get(voice),
+            ledger=ledger,
+            now_beat=at_beat,
         )
         record = pattern.invent(seed, index, len(records), grid, groove, bed)
         chosen[voice] = record.pattern
         records.append(record)
+
+        # Settle first, then open: a pattern that lands the displaced beat and
+        # promptly displaces another one has done both, and in that order.
+        for owed in ledger.live(at_beat, domain="metre"):
+            if promise.pattern_settles(owed, record.pattern.slots, record.pattern.subdivision):
+                ledger = ledger.settle(owed, at_beat, f"{voice} landed it")
+        ledger = ledger.opened(promise.from_pattern(
+            record.pattern.slots, grid.weights, record.pattern.subdivision, at_beat, voice))
+
         for slot, _ in record.pattern.onsets():
             claimed.add(pattern.in_bar(slot * record.pattern.subdivision, bar_beats))
 
-    return chosen, tuple(records)
+    return chosen, tuple(records), ledger
 
 
 def write_movement(seed: int, index: int, movement: Movement, origin: float,
@@ -80,7 +94,7 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                    motif: theory.Motif, voices: list[VoiceSpec], kit: tuple[VoiceSpec, ...],
                    patterns: dict[str, Pattern], drives: Drives, taste: Taste,
                    lineage: Phrase | None, heard: frozenset[tuple[int, int]],
-                   approach: int | None = None) -> Written:
+                   approach: int | None = None, ledger: Ledger = Ledger()) -> Written:
     """Write one movement under the current drives, taste and patterns."""
     notes: list[Note] = []
     strokes: list[Stroke] = []
@@ -95,9 +109,10 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
         span = min(chord_beats, end - cursor)
         for voice in voices:
             if voice.role == ROLE_LEAD:
-                written, lineage, heard, approach, choice = _lead(
+                written, lineage, heard, approach, ledger, choice = _lead(
                     seed, index, chord_index, voice, chord, scale, root_pitch,
-                    cursor, span, movement, motif, drives, taste, lineage, heard, approach)
+                    cursor, span, movement, motif, drives, taste, lineage, heard,
+                    approach, ledger)
                 notes.extend(written)
                 if choice is not None:
                     choices.append(choice)
@@ -126,13 +141,13 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
             ))
 
     return Written(notes=tuple(notes), strokes=tuple(strokes), choices=tuple(choices),
-                   lineage=lineage, heard=heard, approach=approach)
+                   lineage=lineage, heard=heard, approach=approach, ledger=ledger)
 
 
 # ── the lead: audition, then play the winner ──────────────────────────────
 
 def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span,
-          movement, motif, drives, taste, lineage, heard, approach):
+          movement, motif, drives, taste, lineage, heard, approach, ledger):
     """Choose a phrase for this chord and write it out.
 
     The choosing happens in scale degrees, which is why it can be judged before
@@ -143,7 +158,7 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
     stream = f"{voice.voice_id}-{index}-{chord_index}"
     rest_gate = 0.22 + movement.energy * 0.72 * drives.density_bias
     if rng.uniform(seed, f"{stream}-rest", 0) > rest_gate:
-        return [], lineage, heard, approach, None
+        return [], lineage, heard, approach, ledger, None
 
     setting = Setting(
         scale=scale,
@@ -156,6 +171,8 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
         germ=tuple(b - a for a, b in zip(motif.steps, motif.steps[1:])),
         heard=heard,
         approach=approach,
+        ledger=ledger,
+        now_beat=start,
     )
     choice = melody.choose(seed, index, chord_index, setting, taste, lineage, motif,
                            at_beat=start)
@@ -183,13 +200,22 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
         offset += length
 
     notes = _pull_toward_centre(notes, drives, seed, stream)
+    # The ledger moves in the same order the music does: what this phrase
+    # answered is settled, and only then does what it opened go on the books.
+    for owed in ledger.live(start, domain="pitch"):
+        if promise.would_settle(owed, phrase.steps, chord.degree):
+            ledger = ledger.settle(owed, start, f"{voice.voice_id} answered it")
+    ledger = ledger.opened(
+        promise.from_phrase(phrase.steps, chord.degree, scale, start, approach))
+    ledger = ledger.forget(start)
+
     moves = [b - a for a, b in zip(phrase.steps, phrase.steps[1:])]
     heard = heard | {(a, b) for a, b in zip(moves, moves[1:])}
     # Where this phrase actually stopped, so the next audition can judge the
     # step into itself. The lineage stays unvoiced — mutations work on the idea,
     # not on the copy the register drives happened to make of it.
     landed = chord.degree + phrase.steps[played] if notes else approach
-    return notes, choice.chosen, heard, landed, choice
+    return notes, choice.chosen, heard, landed, ledger, choice
 
 
 # ── everything that is not the tune ───────────────────────────────────────

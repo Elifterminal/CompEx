@@ -31,7 +31,7 @@ import math
 from dataclasses import dataclass
 
 from compex import rng
-from compex.generate import critic, melody, pattern, recall, theory, write
+from compex.generate import critic, melody, pattern, promise, recall, theory, write
 from compex.generate.critic import Analysis, Verdict
 from compex.generate.evolve import Drives, Evolution, initial_drives, respond, trace
 from compex.generate.material import Movement, Note, Stroke
@@ -49,6 +49,7 @@ from compex.generate.palette import (
     build_voice,
 )
 from compex.generate.pattern import Grid, Groove, Pattern, PatternChoice
+from compex.generate.promise import Ledger
 from compex.generate.theory import Chord, Motif
 
 MIN_BPM, MAX_BPM = 52.0, 168.0
@@ -104,6 +105,7 @@ class Composition:
     taste: Taste = Taste()
     opening_taste: Taste = Taste()
     groove: Groove = Groove()
+    ledger: Ledger = Ledger()
 
     @property
     def seconds_per_beat(self) -> float:
@@ -128,6 +130,9 @@ class Composition:
 
     def pattern_trace(self) -> str:
         return pattern.trace(self.patterns)
+
+    def ledger_trace(self) -> str:
+        return promise.trace(self.ledger, self.total_beats)
 
     def final_patterns(self) -> tuple[Pattern, ...]:
         """The last pattern each voice settled on."""
@@ -158,6 +163,7 @@ class Composition:
                                       for p in self.final_patterns()) or "none"),
             f"taste moved on: {', '.join(strayed) if strayed else 'nothing'}"
             f" · {moved} rhythm grid(s) past their starting weights",
+            f"promises: {self.ledger.summary(self.total_beats)}",
             f"evolved: {corrections} corrections over {len(self.evolution)} listen-backs, "
             f"plasticity {self.final_drives.plasticity:.2f}",
         ])
@@ -207,6 +213,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     lineage: Phrase | None = None
     heard: frozenset[tuple[int, int]] = frozenset()
     approach: int | None = None
+    ledger = Ledger()
     figures: dict[str, Pattern] = {}
     cursor = 0.0
 
@@ -236,20 +243,23 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
             drives = drives.with_use(used)
 
         working = _reharmonise(progression, seed, index, drives, scale)
+        ledger = _harmony_promises(ledger, working, scale, cursor)
 
-        figures, chosen = write.choose_patterns(
+        figures, chosen, ledger = write.choose_patterns(
             seed, index, movement, grids, groove, drives,
-            float(beats_per_bar), figures)
+            float(beats_per_bar), figures, ledger, cursor)
         patterns.extend(chosen)
 
         written = write.write_movement(
             seed, index, movement, cursor, scale, root_pitch, working, chord_beats,
             current_motif, voices, kit, figures, drives, taste, lineage, heard, approach,
+            ledger,
         )
         notes.extend(written.notes)
         strokes.extend(written.strokes)
         melodies.extend(written.choices)
         lineage, heard, approach = written.lineage, written.heard, written.approach
+        ledger = written.ledger
 
         # What it played is what it now believes belongs there. This is the
         # channel the critic has no part in — the grids learn from the output.
@@ -271,6 +281,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         melodies=tuple(melodies), patterns=tuple(patterns),
         grids=tuple(grids.values()), retunings=tuple(retunings),
         taste=taste, opening_taste=opening_taste, groove=groove,
+        ledger=ledger.forget(cursor),
     )
 
 
@@ -302,6 +313,28 @@ def _reharmonise(base: tuple[Chord, ...], seed: int, index: int, drives: Drives,
             degree = (degree + move) % len(scale)
         out.append(Chord(degree=degree, size=size))
     return tuple(out)
+
+
+def _harmony_promises(ledger: Ledger, working: tuple[Chord, ...], scale: tuple[int, ...],
+                      at_beat: float) -> Ledger:
+    """Open and settle the obligations a movement's harmony takes on.
+
+    A progression that reaches a long way round the circle of fifths owes
+    either a return or a reason. What settles it is *ending* at home — every
+    progression here starts there, so passing through on the way out would
+    make the debt cancel itself the moment it was taken on.
+    """
+    span = max(1, len(scale))
+    if working and working[-1].degree % span == 0:
+        for owed in ledger.live(at_beat, domain="harmony"):
+            ledger = ledger.settle(owed, at_beat, "the harmony came home")
+        return ledger
+
+    furthest = max(working, key=lambda chord: promise.fifth_distance(chord.degree, span),
+                   default=None)
+    if furthest is not None:
+        ledger = ledger.opened(promise.from_harmony(furthest.degree, scale, at_beat))
+    return ledger
 
 
 # ── the up-front decisions ────────────────────────────────────────────────
