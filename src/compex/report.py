@@ -13,6 +13,7 @@ the Pyodide boundary and the HTTP boundary without help.
 from __future__ import annotations
 
 from compex.generate.compose import Composition
+from compex.generate.intent import LEVERS, place
 
 
 def movements(composition: Composition) -> list[dict]:
@@ -332,4 +333,33 @@ def taste(composition: Composition) -> dict:
         "chosen": len(composition.melodies),
         "generations": max((choice.chosen.generation for choice in composition.melodies),
                            default=0),
+    }
+
+
+def plan(composition: Composition) -> dict:
+    """What the piece was trying to do to itself, and whether it managed it.
+
+    The last number is the one that matters and it is not flattering by
+    construction: ``agreement`` is how well the state actually tracked the
+    shape the plan wanted, and a plan that did nothing scores about zero.
+    """
+    intent = composition.plan
+    spans = intent.ranges()
+    return {
+        "intent": intent.intent.name,
+        "why": intent.intent.why,
+        "watched": len(intent.readings),
+        "agreement": round(intent.agreement(), 3),
+        "turns": [{"at": round(position, 3), "from": was, "to": now}
+                  for position, was, now in intent.turns],
+        "levers": [{"aims_at": variable, "by": lever,
+                    "pushed_to": round(intent.lever(lever), 3)}
+                   for variable, lever in sorted(LEVERS.items())],
+        "curves": [{"name": name,
+                    "wanted": [round(dict(reading.targets).get(name, 0.0), 3)
+                               for reading in intent.readings],
+                    "got": [round(place(dict(reading.values)[name], *spans[name]), 3)
+                            for reading in intent.readings]}
+                   for name in sorted(spans)],
+        "gave_up": len(composition.ledger.given_up),
     }

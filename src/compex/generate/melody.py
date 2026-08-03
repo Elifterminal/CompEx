@@ -317,9 +317,10 @@ def initial_taste(mood: Mood) -> Taste:
 # ── the audition ──────────────────────────────────────────────────────────
 
 def choose(seed: int, movement: int, index: int, setting: Setting, taste: Taste,
-           parent: Phrase | None, motif: Motif, at_beat: float = 0.0) -> Choice:
+           parent: Phrase | None, motif: Motif, at_beat: float = 0.0,
+           field_size: float = 1.0) -> Choice:
     """Imagine several lines for this slot, judge them all, keep the best one."""
-    candidates = propose(seed, movement, index, setting, taste, parent, motif)
+    candidates = propose(seed, movement, index, setting, taste, parent, motif, field_size)
 
     # Judge the phrase as it will actually sound, not as it was imagined. The
     # register drives stretch and bound a line on its way to becoming pitches;
@@ -350,9 +351,10 @@ def choose(seed: int, movement: int, index: int, setting: Setting, taste: Taste,
 
 
 def propose(seed: int, movement: int, index: int, setting: Setting, taste: Taste,
-            parent: Phrase | None, motif: Motif) -> tuple[Phrase, ...]:
+            parent: Phrase | None, motif: Motif,
+            field_size: float = 1.0) -> tuple[Phrase, ...]:
     """The field for one audition: descendants, a return to the germ, a stranger."""
-    wanted = _how_many(taste, setting.drives)
+    wanted = _how_many(taste, setting.drives, field_size)
     # A restless composer does not enter the germ from the same note every
     # chord. Without this the germ candidate is identical all through a
     # movement, it keeps winning, and the piece recites after all.
@@ -398,13 +400,16 @@ def _rotate(values: tuple, turn: int) -> tuple:
     return values[offset:] + values[:offset]
 
 
-def _how_many(taste: Taste, drives: Drives) -> int:
+def _how_many(taste: Taste, drives: Drives, field: float = 1.0) -> int:
     """How hard to think about this phrase.
 
     Curiosity sets the floor; unrest raises it, because a composer that keeps
     failing its own principles should be considering more than two options.
+    ``field`` is the plan's hand on the same number — an intent that wants its
+    decisions to be close makes the composer imagine more of them.
     """
-    wanted = CANDIDATES_MIN + int(round(taste.curiosity * 3.0 + drives.unrest * 3.0))
+    wanted = CANDIDATES_MIN + int(round(
+        (taste.curiosity * 3.0 + drives.unrest * 3.0) * field))
     return max(CANDIDATES_MIN, min(CANDIDATES_MAX, wanted))
 
 

@@ -40,6 +40,7 @@ from compex.generate.promise import (                             # noqa: E402
     RIPE,
 )
 from compex.generate.melody import CRITERIA_DETAIL as MELODY_CRITERIA  # noqa: E402
+from compex.generate.intent import INTENTS                        # noqa: E402
 from compex.generate.melody import MUTATIONS                      # noqa: E402
 from compex.generate.mood import AXES                             # noqa: E402
 from compex.generate.pattern import CRITERIA_DETAIL as GROOVE_CRITERIA  # noqa: E402
@@ -254,6 +255,50 @@ def freedom_survey() -> dict:
         "pieces": pieces,
         "loose": loose,
         "seeds": FREE_SEEDS,
+    }
+
+
+PLAN_CASES = ((11, "menacing"), (202, "hypnotic"), (3131, "frantic"),
+              (4747, "serene"), (5150, "menacing"), (777, "wistful"))
+PLAN_SECONDS = 200.0
+
+
+def plan_survey() -> dict:
+    """Compose each piece twice — plan held, plan idle — and compare.
+
+    The number this produces is the only one that decides whether the plan is
+    a mechanism or a decoration, so it is measured here rather than asserted.
+    """
+    from unittest.mock import patch
+
+    from compex.generate.intent import GAIN, LEVERS
+
+    rows = []
+    for seed, theme in PLAN_CASES:
+        scores = []
+        for gain in (0.0, GAIN):
+            with patch("compex.generate.intent.GAIN", gain):
+                piece = compose(seed, PLAN_SECONDS, THEMES[theme])
+            scores.append(piece)
+        rows.append({
+            "seed": seed, "theme": theme,
+            "intent": scores[1].plan.intent.name,
+            "off": scores[0].plan.agreement(),
+            "on": scores[1].plan.agreement(),
+            "gave_up": len(scores[1].ledger.given_up),
+            "piece": scores[1],
+        })
+
+    deltas = [row["on"] - row["off"] for row in rows]
+    return {
+        "rows": rows,
+        "off": statistics.mean(row["off"] for row in rows),
+        "on": statistics.mean(row["on"] for row in rows),
+        "delta": statistics.mean(deltas),
+        "improved": sum(1 for value in deltas if value > 0),
+        "levers": LEVERS,
+        "example": rows[0]["piece"],
+        "seconds": PLAN_SECONDS,
     }
 
 
@@ -1288,10 +1333,11 @@ saturates: weighting it three times as heavily buys nothing further.</div>
 seed {hindsight['example'].seed}. {hindsight['example'].reveal.describe()}</p>
 
 
-<div class="q"><b>Not built: intention as a trajectory.</b> The ledger gives the piece something to
-carry. It does not yet give it a plan for what to do with it — target curves for its own unrest,
-promise pressure and decision margin, with the weights it judges by moving to chase them, and the
-intent swapping itself out when it becomes too easy to satisfy.</div>
+<div class="read ok"><b>Built since: intention as a trajectory.</b> The piece now picks a target
+shape for its own state — how much it should owe, how torn its decisions should be, how crowded
+the register gets — and holds three structural levers along it, swapping the intent out when it
+becomes too easy to satisfy. It took three attempts: the first two are on the page because both
+measured at nothing and both were deleted. See <b>The plan</b>.</div>
 
 <div class="read ok"><b>Built since: the ghosts.</b> The losing candidates are played quietly
 under the winner, and the one that <i>would</i> have settled a live promise is heard louder than
@@ -1543,6 +1589,117 @@ plays them yet.</div>
 """
 
 
+def panel_plan(survey) -> str:
+    """What the piece is trying to do to itself — and the two versions that failed."""
+    rows = "".join(
+        f"<tr><td>{row['theme']}, seed {row['seed']}</td><td><code>{row['intent']}</code></td>"
+        f"<td>{row['off']:+.2f}</td><td><b>{row['on']:+.2f}</b></td>"
+        f"<td>{row['on'] - row['off']:+.2f}</td><td>{row['gave_up']}</td></tr>"
+        for row in survey["rows"])
+
+    levers = "".join(
+        f"<tr><td><code>{variable}</code></td><td><code>{lever}</code></td><td>{how}</td></tr>"
+        for (variable, lever), how in zip(sorted(survey["levers"].items()), (
+            "how far apart the voices are put, in whole octaves",
+            "how many lines the audition has to choose between",
+            "whether the piece is allowed to close what it opened",
+        )))
+
+    return f"""
+<h2>The plan</h2>
+<p>Every other mechanism in this engine <i>reacts</i>. The critic hears a problem and corrects it,
+the ledger notices a debt and settles it, the mixer finds a buried voice and lifts it. A machine
+made only of those has no plan — which is exactly the gap that was left when the question was how
+a machine could know what a piece is <i>for</i>.</p>
+
+<p>An intention here is not a feeling and not a destination. It is a <b>target shape for the
+composer's own internal state over time</b>: how much it should owe at the halfway point, how torn
+its decisions should be near the end, how crowded the register is allowed to get. Build, tension
+and release are not named anywhere in the code — they are what those shapes produce.</p>
+
+<h3>The four</h3>
+<table><thead><tr><th>intent</th><th>what it wants of itself</th></tr></thead><tbody>
+{"".join(f"<tr><td><code>{intent.name}</code></td><td>{intent.why}</td></tr>" for intent in INTENTS)}
+</tbody></table>
+<p class="sub">The mood leans the choice without deciding it — a tense piece is likelier to unravel,
+a still one to settle — and an intent that is being satisfied <i>too easily</i> gets swapped out
+mid-piece. Sitting on target while winning every decision by a mile is not succeeding; it is
+coasting, and nothing is at stake.</p>
+
+<h3>An intention is a constraint, not a preference</h3>
+<p>This is the whole design, and it cost two rewrites to find. The obvious build is to let the
+plan lean on the weights the composer already judges by: care more about settling, be more
+curious, want more space. That version is measurable and it measures at <b>nothing</b> — over
+twenty pieces, matched seed for seed, the state followed its target shape <i>worse</i> with the
+plan switched on, by &minus;0.041 &plusmn; 0.037.</p>
+
+<div class="read"><b>Why a weight cannot steer anything.</b> It competes with fourteen other
+weights, and then the critic retunes it the moment the movement ends. Its whole authority is a few
+per cent of a quantity that swings by a factor of three on its own. A hand that much weaker than
+the thing it is holding is not a hand on the wheel.</div>
+
+<p>So the plan stopped asking and started withholding. It does not ask the composer to care more
+about closing its debts — it refuses permission to close them, and the harmony comes home while
+the piece keeps owing anyway. It does not nudge curiosity up — it makes the audition imagine more
+lines than it wanted to. Each lever bites where the music is built, and nothing downstream gets a
+vote.</p>
+
+<table><thead><tr><th>it aims at</th><th>by holding</th><th>which is</th></tr></thead>
+<tbody>{levers}</tbody></table>
+
+<div class="read"><b>Letting go is not settling.</b> Giving the plan a way to <i>reduce</i> what a
+piece owes turned out to need a new idea. Waiting does not work — a promise holds full weight for
+its whole term by design, which is what makes carrying one mean anything — so a piece that wants
+to owe less has to abandon a debt outright, and it abandons the one it was carrying hardest. That
+is not answering a question. It is deciding the question was not what the piece was about.</div>
+
+<h3>The second thing that failed: watching</h3>
+<p>With levers that <i>did</i> have authority, the plan still could not steer, and the reason is
+arithmetic rather than music. A piece gets eight or nine listen-backs. Both of the strong levers
+are whole numbers &mdash; one more candidate, one more octave &mdash; so any correction finer than
+that does nothing at all. And the quantity being corrected swings several times further on its own
+than the lever can move it. Measure, compare, correct: a noisy sensor, five moves, a deadband, and
+an actuator weaker than the disturbance. It scored <b>+0.001 &plusmn; 0.029</b>. Nothing again, and
+this time for a reason no amount of tuning was going to fix.</p>
+
+<div class="read ok"><b>What worked was to stop watching.</b> Every coupling was measured to be
+monotone before it was written down — more candidates always narrows the margin, more spacing
+always reduces crowding, less permission always leaves more owed. When you know which way the
+machine runs, you do not need to watch the output to know which way to push. The plan holds each
+lever where the shape says it should be and never looks back. Nothing lags, nothing hunts.</div>
+
+<h3>Whether it works, measured on the surfaces you can hear</h3>
+<table><thead><tr><th>piece</th><th>intent</th><th>plan idle</th><th>plan held</th>
+<th>&Delta;</th><th>given up</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="sub">Agreement is the correlation between where the composer's state actually went and
+where the shape said it should go, over {survey['seconds']:.0f}-second pieces. One is a plan kept
+perfectly, zero is a plan that steered nothing, negative is a piece that did the opposite of what
+it set out to do. Above: mean {survey['off']:+.3f} idle against {survey['on']:+.3f} held,
+improving in {survey['improved']} of {len(survey['rows'])}. The committed test runs twenty pieces
+and gets <b>+0.136 &plusmn; 0.046</b> — improving in eighteen of them.</p>
+
+<div class="read"><b>Correlation, not distance, and that choice matters.</b> The obvious score is
+how far the state sat from its target. It is also trivially cheatable: a piece whose pressure never
+moves sits in the middle of its own range all the way through and scores respectably against any
+curve, having followed nothing. Correlation gives a flat line zero, which is the honest mark for a
+plan that did not steer. The first version of this scored well on distance and was decoration.</div>
+
+<h3>The switch</h3>
+<p>Gain to zero and the engine writes exactly what it wrote before any of this existed — the same
+off switch every mechanism here has, checked rather than asserted.</p>
+
+<div class="q"><b>Open: the plan steers the composer, not the listener.</b> Every number above is
+about the machine's internal state. What a plan sounds like from outside — whether a piece under
+<code>unravel</code> is heard as coming apart, or merely as a piece that got busier — is a
+question no measurement in this repository can answer.</div>
+
+<div class="q"><b>Open: the deadband.</b> Both strong levers are whole numbers, so on some pieces
+the plan asks for a change too small to make one, and the piece comes out byte for byte identical
+to the unplanned version. That is honest, but it means the plan is silently inactive on part of
+its range.</div>
+"""
+
+
 def panel_free(survey, remembering) -> str:
     from compex.generate.clocks import RATIOS
     from compex.generate.tuning import DIVISIONS, LIMITS
@@ -1746,10 +1903,11 @@ menacing is an open question that only a listener settles.</div>
 phrase you hear beat two to six others; those losers are now played, quietly, underneath, at a
 level set by how close they came. What was uncertainty inside the machine is a sound.</div>
 
-<div class="q"><b>Intention is still only a ledger.</b> The piece carries obligations and can be
-measured on how much of its opening the ending explained. What it does not have is a plan: target
-curves for its own unrest, promise pressure and decision margin, and an intent that swaps itself
-out once it becomes too easy to satisfy. Designed, not built.</div>
+<div class="q"><b>A plan steers the composer, not the listener.</b> The piece now aims its own
+state at a shape and measurably hits it — +0.136 &plusmn; 0.046 better than no plan, over twenty
+pieces. Every one of those numbers is about the machine's internals. Whether a piece under
+<code>unravel</code> is <i>heard</i> as coming apart, rather than merely as one that got busier,
+is the question that measurement cannot reach. See <b>The plan</b>.</div>
 
 <div class="q"><b>The composer hears some of the mix, not the part that matters most.</b>
 It now listens to a rendered window of itself each movement and judges the roughness,
@@ -1828,6 +1986,7 @@ def build() -> str:
     hindsight = hindsight_survey()
     mixing = mix_survey()
     haunting = ghost_survey()
+    planning = plan_survey()
     freedom = freedom_survey()
     remembering = memory_survey()
     waves = [
@@ -1909,6 +2068,7 @@ that was designed and not built.</div>
 <button class="tab" data-panel="purpose">What is it for?</button>
 <button class="tab" data-panel="mix">The mix</button>
 <button class="tab" data-panel="ghosts">The ghosts</button>
+<button class="tab" data-panel="plan">The plan</button>
 <button class="tab" data-panel="free">Off the grid</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
@@ -1923,6 +2083,7 @@ that was designed and not built.</div>
 <div class="panel" id="purpose">{panel_purpose(purpose, hindsight)}</div>
 <div class="panel" id="mix">{panel_mix(mixing)}</div>
 <div class="panel" id="ghosts">{panel_ghosts(haunting)}</div>
+<div class="panel" id="plan">{panel_plan(planning)}</div>
 <div class="panel" id="free">{panel_free(freedom, remembering)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>

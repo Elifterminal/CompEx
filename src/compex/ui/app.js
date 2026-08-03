@@ -210,6 +210,7 @@ function drawChoices(data) {
   drawGhosts(data.ghosts);
   drawMix(data.mix);
   drawHindsight(data.hindsight);
+  drawPlan(data.plan);
   drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
@@ -320,6 +321,30 @@ function drawHindsight(reveal) {
     <p class="note">${reveal.note} — measured over ${reveal.phrases} opening phrases,
        against ${reveal.literal} to spell them all out.</p>
     <div>${recalls}</div>`);
+}
+
+function drawPlan(plan) {
+  const host = $("plan");
+  if (!plan || !plan.watched) { host.innerHTML = ""; return; }
+
+  // Agreement is the honest number: one is a plan kept, zero is a plan that
+  // steered nothing, negative is a piece that did the opposite.
+  const kept = plan.agreement > 0.25 ? "ok" : plan.agreement < 0 ? "bad" : "";
+  const levers = plan.levers.map((l) =>
+    `<span class="pill">${l.aims_at} &larr; ${l.by} &times;${l.pushed_to}</span>`).join(" ");
+  const turns = plan.turns.map((t) =>
+    `<div class="note">gave up on <code>${t.from}</code> for <code>${t.to}</code>
+      ${Math.round(t.at * 100)}% of the way through — it had become too easy</div>`).join("");
+  const gave = plan.gave_up
+    ? `<div class="note">abandoned ${plan.gave_up} promise${plan.gave_up === 1 ? "" : "s"}
+        — not settled, given up on</div>`
+    : "";
+
+  host.innerHTML = `<div class="carrying"><b>trying to ${plan.intent}</b>
+      <span class="note">${plan.why}</span></div>
+    <div class="note ${kept}">followed its own shape to ${plan.agreement.toFixed(2)}
+      over ${plan.watched} listen-backs</div>
+    <div style="margin-top:6px">${levers}</div>${turns}${gave}`;
 }
 
 function drawLedger(ledger) {

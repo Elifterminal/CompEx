@@ -78,6 +78,7 @@ class Session:
             "melody": report.melody(self.composition),
             "patterns": report.patterns(self.composition),
             "taste": report.taste(self.composition),
+            "plan": report.plan(self.composition),
             "ledger": report.ledger(self.composition),
             "ghosts": report.ghosts(self.composition, self.ghost_gain),
             "memory": report.memory(self.composition, self.learned),

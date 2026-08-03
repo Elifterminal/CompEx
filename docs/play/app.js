@@ -318,6 +318,16 @@ function drawChoices(info) {
     </div>`;
   }).join("");
 
+  const plan = info.plan;
+  if (plan && plan.watched) {
+    const turns = plan.turns.length
+      ? `<div class="hint">changed its mind ${plan.turns.length}&times; — the plan had got too easy</div>`
+      : "";
+    $("plan").innerHTML = `<h3 class="mini">what it was trying to do</h3>
+      <div class="hint"><b>${plan.intent}</b> — ${plan.why}</div>
+      <div class="hint">followed its own shape to ${plan.agreement.toFixed(2)}</div>${turns}`;
+  }
+
   const remembered = info.memory;
   if (remembered) {
     $("memory").innerHTML = remembered.pieces

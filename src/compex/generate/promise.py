@@ -114,6 +114,7 @@ class Ledger:
 
     open: tuple[Promise, ...] = ()
     paid: tuple[Settlement, ...] = ()
+    given_up: tuple[Promise, ...] = ()
 
     def live(self, now: float, domain: str | None = None) -> tuple[Promise, ...]:
         """Promises still worth answering — forgotten ones fall off here."""
@@ -155,13 +156,35 @@ class Ledger:
         """Drop what has faded, so the ledger cannot grow without bound."""
         return replace(self, open=self.live(now))
 
+    def let_go(self, now: float, count: int) -> "Ledger":
+        """Abandon the debts being carried hardest. Not the same as settling.
+
+        Settling is answering something; this is deciding it was not what the
+        piece is about after all. It has to be explicit rather than a matter of
+        waiting, because a promise does not fade merely by being ignored — the
+        maturity curve holds it at full weight for the whole of its term, which
+        is what makes carrying one mean anything.
+
+        The deepest go first on purpose. Letting go of a debt nobody was still
+        hearing costs nothing; what actually moves a piece is dropping the one
+        it had been about.
+        """
+        if count <= 0:
+            return self
+        doomed = sorted(self.live(now), key=lambda p: -p.pressure(now))[:count]
+        if not doomed:
+            return self
+        return replace(self, open=tuple(p for p in self.open if p not in doomed),
+                       given_up=self.given_up + tuple(doomed))
+
     def summary(self, now: float) -> str:
         live = self.live(now)
         deepest = self.deepest(now)
         carried = f", carrying {deepest.kind} for {now - deepest.opened_at:g} beats" \
             if deepest else ""
+        gone = f", {len(self.given_up)} given up" if self.given_up else ""
         return (f"{len(live)} open ({self.pressure(now):.2f} pressure), "
-                f"{len(self.paid)} settled{carried}")
+                f"{len(self.paid)} settled{gone}{carried}")
 
 
 # ── what opens an account ─────────────────────────────────────────────────

@@ -34,8 +34,11 @@ from compex import rng
 from compex.generate import (
     clocks as clockwork,
 )
-from compex.generate import critic, melody, pattern, promise, recall, theory, tuning, write
+from compex.generate import (
+    critic, intent as planning, melody, pattern, promise, recall, theory, tuning, write,
+)
 from compex.generate.critic import Analysis, Verdict
+from compex.generate import evolve
 from compex.generate.evolve import Drives, Evolution, initial_drives, respond, trace
 from compex.generate.material import Movement, Note, Stroke
 from compex.generate.melody import Choice, Phrase, Taste
@@ -55,6 +58,7 @@ from compex.generate.pattern import Grid, Groove, Pattern, PatternChoice
 from compex.generate.promise import Ledger
 from compex.generate.theory import Chord, Motif
 from compex.generate.clocks import Clock
+from compex.generate.intent import Plan
 from compex.generate.tuning import Tuning
 from compex import measure, remember
 from compex.dsp import listen
@@ -126,6 +130,7 @@ class Composition:
     states: tuple[tuple[str, int, VoiceSpec], ...] = ()
     heard: tuple[listen.Heard, ...] = ()
     memory: Memory = Memory()
+    plan: Plan = Plan(intent=planning.INTENTS[0])
     taste: Taste = Taste()
     opening_taste: Taste = Taste()
     groove: Groove = Groove()
@@ -202,6 +207,7 @@ class Composition:
             f"promises: {self.ledger.summary(self.total_beats)}",
             "heard: " + (self.heard[-1].describe() if self.heard else "not listened to"),
             f"memory: {self.memory.describe()}",
+            f"intent: {self.plan.summary()}",
             f"ghosts: {len(self.ghosts)} notes it decided against, kept audible",
             "clocks: " + clockwork.summary({c.voice: c for c in self.clocks},
                                            float(self.beats_per_bar)),
@@ -246,6 +252,7 @@ def compose(seed: int, duration_s: float, mood: Mood,
     archetype = _archetype(seed, mood)
 
     movements = _movements(seed, duration_s, bpm, beats_per_bar, mood, archetype)
+    total_beats = sum(movement.beats for movement in movements)
     voices = _voices(seed, mood, memory)
     kit = build_kit(seed, mood)
     grids = _grids(seed, kit, voices, beats_per_bar, mood)
@@ -253,6 +260,7 @@ def compose(seed: int, duration_s: float, mood: Mood,
     lead_voices = frozenset(v.voice_id for v in voices if v.role == ROLE_LEAD)
 
     drives = initial_drives(mood, root_pitch)
+    plan = planning.choose(seed, mood)
     opening_taste = _remembered_taste(melody.initial_taste(mood), memory)
     taste = opening_taste
     groove = _remembered_groove(pattern.initial_groove(mood), memory)
@@ -308,6 +316,17 @@ def compose(seed: int, duration_s: float, mood: Mood,
             recent = tuple(c for c in melodies if c.movement == index - 1)
             taste, taste_shifts = melody.retune(taste, opening_taste, verdicts, recent, drives)
             groove, groove_shifts = pattern.retune(groove, verdicts, drives)
+
+            # And then the plan: not another judge of the music, but a target
+            # shape for the composer's own state, leaning on the weights that
+            # were already deciding things.
+            reading = planning.read(
+                plan, cursor / max(total_beats, 1e-6),
+                pressure=ledger.pressure(cursor),
+                margin=(sum(c.margin for c in recent) / len(recent)) if recent else 0.0,
+                crowding=analysis.crowding,
+            )
+            plan = planning.reconsider(plan, reading, seed, index)
             retunings.append(Retuning(index, movement.name, taste_shifts, groove_shifts))
 
             current_motif, used = _next_motif(current_motif, sketch, seed, index,
@@ -321,21 +340,22 @@ def compose(seed: int, duration_s: float, mood: Mood,
         states.extend((spec.voice_id, index, spec) for spec in playing)
 
         working = _reharmonise(progression, seed, index, drives, scale)
-        ledger = _harmony_promises(ledger, working, scale, cursor)
+        ledger = _harmony_promises(ledger, working, scale, cursor,
+                                   plan.lever("settling"))
 
         figures, chosen, ledger = write.choose_patterns(
             seed, index, movement, grids, groove, drives,
             float(beats_per_bar), figures, ledger, cursor)
         patterns.extend(chosen)
 
-        total = sum(m.beats for m in movements)
         past = tuple(shapes[1:PAST_WINDOW + 1])
         written = write.write_movement(
             seed, index, movement, cursor, scale, root_pitch, working, chord_beats,
             current_motif, playing, kit, figures, drives, taste, lineage, heard_pairs, approach,
-            ledger, cursor / max(total, 1e-6),
+            ledger, cursor / max(total_beats, 1e-6),
             past, tuple(shapes[-VOCABULARY_WINDOW:]),
             measure.baseline(past, tuple(shapes[:1])), ticking,
+            push=plan.bias,
         )
         notes.extend(written.notes)
         strokes.extend(written.strokes)
@@ -368,7 +388,7 @@ def compose(seed: int, duration_s: float, mood: Mood,
         grids=tuple(grids.values()), retunings=tuple(retunings),
         clocks=tuple(ticking.values()), states=tuple(states),
         heard=tuple(listened),
-        taste=taste, opening_taste=opening_taste, groove=groove, memory=memory,
+        taste=taste, opening_taste=opening_taste, groove=groove, memory=memory, plan=plan,
         ledger=ledger.forget(cursor),
         reveal=_reveal_of(tuple(shapes), movements),
     )
@@ -448,17 +468,38 @@ def _revelation(shapes: list[Shape], movements: tuple[Movement, ...], index: int
     return min(1.0, so_far.share)
 
 
+#: Below this the plan withholds permission to settle: the harmony comes home
+#: and the piece keeps owing anyway. Above the second, it stops waiting out the
+#: full term on debts that have gone stale and lets them go.
+HOLD, LET_GO = 0.8, 1.3
+
+#: How many debts a plan past :data:`LET_GO` abandons per movement, per unit of
+#: permission. Advancing the clock instead was tried first and did nothing: a
+#: promise holds full weight for its whole term by design, so nothing fades
+#: early no matter how far the clock is pushed. Letting go has to be a decision.
+LETTING = 4
+
+
 def _harmony_promises(ledger: Ledger, working: tuple[Chord, ...], scale: tuple[int, ...],
-                      at_beat: float) -> Ledger:
+                      at_beat: float, settling: float = 1.0) -> Ledger:
     """Open and settle the obligations a movement's harmony takes on.
 
     A progression that reaches a long way round the circle of fifths owes
     either a return or a reason. What settles it is *ending* at home — every
     progression here starts there, so passing through on the way out would
     make the debt cancel itself the moment it was taken on.
+
+    ``settling`` is the plan's permission, and it is a permission rather than a
+    preference on purpose. Below :data:`HOLD` the piece refuses to close what
+    it opened even when the harmony hands it the chance — it comes home and
+    keeps owing anyway, which is the only way anything can be made to carry.
+    Above :data:`LET_GO` it stops waiting the full term and drops what has gone
+    stale, which is not settling: it is giving up on it.
     """
     span = max(1, len(scale))
-    if working and working[-1].degree % span == 0:
+    if settling > LET_GO:
+        ledger = ledger.let_go(at_beat, int((settling - LET_GO) * LETTING))
+    if working and working[-1].degree % span == 0 and settling >= HOLD:
         for owed in ledger.live(at_beat, domain="harmony"):
             ledger = ledger.settle(owed, at_beat, "the harmony came home")
         return ledger

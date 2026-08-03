@@ -10,6 +10,7 @@ turned into.
 from __future__ import annotations
 
 from compex.generate.compose import Composition
+from compex.generate.intent import LEVERS
 from compex.generate.palette import ROLE_PERC
 from compex.generate.theory import Chord
 
@@ -31,6 +32,7 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         *_clocks(composition),
         *_voices(composition),
         *_melody(composition),
+        *_plan(composition),
         *_ledger(composition),
         *_hindsight(composition),
         *_ghosts(composition),
@@ -204,6 +206,39 @@ def _melody(composition: Composition) -> list[str]:
                           f"\\mathrm{{\\ slots}},\\ \\bar\\Delta{grid.strayed():.2f})"
                           for grid in moved)
         )
+    return lines
+
+
+def _plan(composition: Composition) -> list[str]:
+    """What the piece set out to do to itself, and how close it came.
+
+    The agreement figure is printed whatever it says. A plan that scored zero
+    steered nothing, and that belongs in the formula next to everything else
+    the piece is willing to admit about itself.
+    """
+    plan = composition.plan
+    if not plan.readings or plan.intent.name == "none":
+        return []
+
+    lines = [
+        "\\mathrm{INTENT}=\\mathrm{" + plan.intent.name + "},\\ "
+        f"\\rho={plan.agreement():+.2f}\\mathrm{{\\ agreement\\ with\\ its\\ own\\ shape}}"
+    ]
+    for variable, lever in sorted(LEVERS.items()):
+        pushed = plan.lever(lever)
+        if abs(pushed - 1.0) >= 0.02:
+            lines.append(
+                f"\\mathrm{{{variable}}}\\ \\mathrm{{held\\ by\\ }}"
+                f"\\mathrm{{{lever}}}\\times{pushed:.2f}"
+            )
+    for position, was, now in plan.turns:
+        lines.append(
+            "\\mathrm{" + was + "}\\rightarrow\\mathrm{" + now + "}"
+            f"\\ \\mathrm{{at\\ }}{position * 100:.0f}\\%"
+        )
+    if composition.ledger.given_up:
+        lines.append(f"\\mathrm{{GAVE\\ UP}}:\\ "
+                     f"{len(composition.ledger.given_up)}\\mathrm{{\\ promises\\ abandoned}}")
     return lines
 
 

@@ -129,6 +129,7 @@ class CompexHandler(BaseHTTPRequestHandler):
             "melody": report.melody(result.composition),
             "patterns": report.patterns(result.composition),
             "taste": report.taste(result.composition),
+            "plan": report.plan(result.composition),
             "ledger": report.ledger(result.composition),
             "ghosts": report.ghosts(result.composition, knobs.ghost_gain),
             "memory": report.memory(result.composition, result.memory),

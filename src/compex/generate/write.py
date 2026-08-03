@@ -131,7 +131,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                    position: float = 0.0, past: tuple[Shape, ...] = (),
                    vocabulary: tuple[Shape, ...] = (),
                    past_cost: tuple[float, ...] = (),
-                   clocks: dict[str, Clock] | None = None) -> Written:
+                   clocks: dict[str, Clock] | None = None,
+                   push: tuple[tuple[str, float], ...] = ()) -> Written:
     """Write one movement under the current drives, taste and patterns."""
     notes: list[Note] = []
     strokes: list[Stroke] = []
@@ -141,7 +142,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
     end = origin + movement.beats
     chord_index = 0
     cursor = origin
-    spacing = spread(voices, drives.spacing)
+    pushed = dict(push)
+    spacing = spread(voices, drives.spacing * pushed.get("spread", 1.0))
 
     while cursor < end - 1e-6:
         chord = progression[chord_index % len(progression)]
@@ -153,7 +155,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                     cursor, span, movement, motif, drives, taste, lineage, heard,
                     approach, ledger, position, past, vocabulary, past_cost,
                     spacing.get(voice.voice_id, 0),
-                    (clocks or {}).get(voice.voice_id))
+                    (clocks or {}).get(voice.voice_id),
+                    pushed.get("field", 1.0))
                 notes.extend(written)
                 ghosts.extend(haze)
                 if choice is not None:
@@ -194,7 +197,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
 
 def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span,
           movement, motif, drives, taste, lineage, heard, approach, ledger,
-          position=0.0, past=(), vocabulary=(), past_cost=(), octave=0, clock=None):
+          position=0.0, past=(), vocabulary=(), past_cost=(), octave=0, clock=None,
+          field_size=1.0):
     """Choose a phrase for this chord and write it out.
 
     The choosing happens in scale degrees, which is why it can be judged before
@@ -226,6 +230,7 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
         past_cost=past_cost,
     )
     choice = melody.choose(seed, index, chord_index, setting, taste, lineage, motif,
+                           field_size=field_size,
                            at_beat=start)
     phrase = melody.voiced(choice.chosen, drives)
 
