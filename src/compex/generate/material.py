@@ -26,6 +26,9 @@ class Note:
     pitch: float       # MIDI note number
     velocity: float
     voice: str
+    #: Which state of that voice played it. Instruments drift as the piece
+    #: goes, so "which voice" is no longer enough to know what it sounded like.
+    timbre: int = 0
 
 
 @dataclass(frozen=True)

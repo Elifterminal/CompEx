@@ -101,17 +101,105 @@ def derive(seed: int, mood: Mood, stream: str = "tuning") -> Tuning:
 # ── the three families ────────────────────────────────────────────────────
 
 def twelve(seed: int, mood: Mood, stream: str = "tuning") -> Tuning:
-    """The familiar grid, with one of the named modes on it."""
-    from compex.generate.theory import SCALE_COLOUR, SCALES, pick_scale
+    """The familiar grid — with a mode the machine works out rather than looks up.
 
-    name = pick_scale(seed, mood.valence, mood.tension, stream=f"{stream}-mode")
-    colour = SCALE_COLOUR[name]
+    The named modes were the last table in the project that decided something
+    musical. They are still here, but demoted to what they should always have
+    been: **names for shapes**, checked against afterwards. The machine builds
+    a set of degrees out of the grid by its own criteria, and then we tell the
+    listener if it happens to have reinvented aeolian.
+    """
+    steps = invent(seed, mood, grid=tuple(index * 1.0 for index in range(12)),
+                   stream=f"{stream}-mode")
+    known = name_of(steps)
     return Tuning(
-        name=name.replace("_", " "),
+        name=known or "unnamed mode",
         family="twelve",
-        steps=tuple(float(step) for step in SCALES[name]),
-        detail=f"12-EDO, brightness {colour[0]:.2f}",
+        steps=steps,
+        detail="12-EDO, " + (f"which is {known}" if known else
+                             "a set with no common name"),
     )
+
+
+def invent(seed: int, mood: Mood, grid: tuple[float, ...],
+           stream: str = "invent") -> tuple[float, ...]:
+    """Build a scale out of an available grid, by what the machine can measure.
+
+    Four things are scored, and none of them is "is this a mode somebody wrote
+    down". A set wants a **strong interval** near a fifth to hold it together;
+    **steps of more than one size**, because a set of equal steps has no
+    positions in it and every note sounds like every other; **no hole too wide
+    to step through**; and a **roughness against the tonic** that suits the
+    mood, which is the one place the mood gets a vote.
+    """
+    size = max(4, min(len(grid), 5 + int(mood.density * 3.5)))
+    best, chosen = -1.0, tuple(grid[: size])
+
+    for attempt in range(48):
+        offsets = sorted(rng.pick(seed, f"{stream}-{attempt}", index, grid[1:])
+                         for index in range(size - 1))
+        candidate = _thin((0.0,) + tuple(dict.fromkeys(offsets)))
+        if len(candidate) < 4:
+            continue
+        score = _score(candidate, mood)
+        if score > best:
+            best, chosen = score, candidate
+    return chosen
+
+
+def _score(steps: tuple[float, ...], mood: Mood) -> float:
+    """How good a scale this is, by criteria a machine can check."""
+    gaps = [high - low for low, high in zip(steps, list(steps[1:]) + [OCTAVE])]
+    if max(gaps) > MAX_GAP + MIN_STEP:
+        return -1.0
+
+    # Something near a 3:2 holds a set together — it is why every scale anyone
+    # uses has one, and it is checkable rather than received.
+    anchored = 1.0 if any(abs(step - 7.02) < 0.6 for step in steps) else 0.35
+
+    # More than one size of step. All-equal steps (whole tone, chromatic) have
+    # no landmarks in them, and a melody in one cannot be anywhere in particular.
+    sizes = len({round(gap * 2) / 2 for gap in gaps})
+    variety = min(1.0, (sizes - 1) / 3.0)
+
+    rough = sum(roughness_at(step) for step in steps[1:]) / max(1, len(steps) - 1)
+    wanted = 0.18 + mood.tension * 0.42
+    fits = max(0.0, 1.0 - abs(rough - wanted) / max(wanted, 1e-6))
+
+    return anchored * 0.9 + variety * 0.8 + fits * 1.1 + _focus(steps) * 1.0
+
+
+def _focus(steps: tuple[float, ...]) -> float:
+    """How much one interval recurs inside the set, 0..1.
+
+    This is the property that actually makes the diatonic scale special, and it
+    is checkable without knowing its name: count every interval between every
+    pair of degrees and see whether one size dominates. The major scale has six
+    fifths in it, which is why it holds together and why a chord built anywhere
+    in it sounds related to a chord built anywhere else. A set with a flat
+    interval profile has no such relationships — every pair is as unlike every
+    other pair as possible, and there is nothing for harmony to be *about*.
+    """
+    if len(steps) < 3:
+        return 0.0
+    counts: dict[float, int] = {}
+    for index, low in enumerate(steps):
+        for high in steps[index + 1:]:
+            interval = round(min(high - low, OCTAVE - (high - low)) * 2) / 2
+            counts[interval] = counts.get(interval, 0) + 1
+    pairs = sum(counts.values()) or 1
+    return max(counts.values()) / pairs
+
+
+def name_of(steps: tuple[float, ...]) -> str | None:
+    """Did it happen to reinvent something with a name? Reported, never used."""
+    from compex.generate.theory import SCALES
+
+    rounded = tuple(round(step) for step in steps)
+    for name, known in SCALES.items():
+        if rounded == tuple(known):
+            return name.replace("_", " ")
+    return None
 
 
 def equal(seed: int, mood: Mood, stream: str = "tuning") -> Tuning:

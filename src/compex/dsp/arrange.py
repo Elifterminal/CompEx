@@ -132,13 +132,15 @@ def render_composition(composition: Composition, master_gain: float = 0.89,
 def _render_voices(bus: np.ndarray, composition: Composition, seconds_per_beat: float,
                    progress: ProgressFn, trims: dict[str, float] | None = None) -> None:
     """One voice at a time: synthesise its notes, run its effects, fold it in."""
-    specs = {voice.voice_id: voice for voice in composition.voices}
-    grouped: dict[str, list] = {}
+    # Grouped by (voice, state), not by voice: an instrument drifts as the
+    # piece goes, so the same voice is several instruments over eight minutes
+    # and each one has to be rendered as what it was at the time.
+    grouped: dict[tuple[str, int], list] = {}
     for note in composition.notes:
-        grouped.setdefault(note.voice, []).append(note)
+        grouped.setdefault((note.voice, note.timbre), []).append(note)
 
-    for position, (voice_id, notes) in enumerate(grouped.items()):
-        spec = specs.get(voice_id)
+    for position, ((voice_id, timbre), notes) in enumerate(grouped.items()):
+        spec = composition.state(voice_id, timbre)
         if spec is None:
             continue  # a voice that vanished between compose and render — skip, do not crash
 

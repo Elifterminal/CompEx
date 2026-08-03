@@ -57,6 +57,7 @@ from compex.generate.theory import Chord, Motif
 from compex.generate.clocks import Clock
 from compex.generate.tuning import Tuning
 from compex import measure
+from compex.dsp import listen
 from compex.measure import Reveal, Shape
 
 MIN_BPM, MAX_BPM = 52.0, 168.0
@@ -119,6 +120,10 @@ class Composition:
     tuning: Tuning = Tuning(name="ionian", family="twelve",
                             steps=(0.0, 2.0, 4.0, 5.0, 7.0, 9.0, 11.0))
     clocks: tuple[Clock, ...] = ()
+    #: Every state each voice passed through, as (voice, movement, spec).
+    #: Instruments drift now, so one spec per voice is no longer the whole truth.
+    states: tuple[tuple[str, int, VoiceSpec], ...] = ()
+    heard: tuple[listen.Heard, ...] = ()
     taste: Taste = Taste()
     opening_taste: Taste = Taste()
     groove: Groove = Groove()
@@ -139,6 +144,13 @@ class Composition:
 
     def voice(self, voice_id: str) -> VoiceSpec | None:
         return next((v for v in self.voices if v.voice_id == voice_id), None)
+
+    def state(self, voice_id: str, timbre: int) -> VoiceSpec | None:
+        """The voice as it stood when a given note was written."""
+        for name, movement, spec in self.states:
+            if name == voice_id and movement == timbre:
+                return spec
+        return self.voice(voice_id)
 
     def evolution_trace(self) -> str:
         return trace(self.evolution)
@@ -186,6 +198,7 @@ class Composition:
             f"taste moved on: {', '.join(strayed) if strayed else 'nothing'}"
             f" · {moved} rhythm grid(s) past their starting weights",
             f"promises: {self.ledger.summary(self.total_beats)}",
+            "heard: " + (self.heard[-1].describe() if self.heard else "not listened to"),
             f"ghosts: {len(self.ghosts)} notes it decided against, kept audible",
             "clocks: " + clockwork.summary({c.voice: c for c in self.clocks},
                                            float(self.beats_per_bar)),
@@ -239,8 +252,10 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     retunings: list[Retuning] = []
 
     current_motif = motif
+    states: list[tuple[str, int, VoiceSpec]] = []
+    listened: list[listen.Heard] = []
     lineage: Phrase | None = None
-    heard: frozenset[tuple[int, int]] = frozenset()
+    heard_pairs: frozenset[tuple[int, int]] = frozenset()
     approach: int | None = None
     ledger = Ledger()
     shapes: list[Shape] = [Shape(label="germ", steps=motif.steps, rhythm=motif.rhythm)]
@@ -255,8 +270,16 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
             # enough of it to have been strange in the first place.
             revelation = _revelation(shapes, movements, index, cursor) \
                 if index > 1 else 0.5
+            # And it listens to the sound, not only to the score. One short
+            # window of what the last movement actually became.
+            heard = listen.probe(notes, {name: spec for name, _, spec in states} or
+                                 {v.voice_id: v for v in voices},
+                                 seed, 60.0 / bpm, max(0.0, cursor - movement.beats),
+                                 skip=frozenset(drum.voice_id for drum in kit))
+            listened.append(heard)
             analysis = critic.analyse(notes, strokes, motif, scale, root_pitch,
-                                      cursor, lead_voices, revelation=revelation)
+                                      cursor, lead_voices, revelation=revelation,
+                                      heard=heard)
             verdicts = critic.judge(analysis, mood)
             before = drives
             drives, adjustments = respond(drives, verdicts, analysis)
@@ -277,6 +300,12 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
                                               movement.tension, drives)
             drives = drives.with_use(used)
 
+        # The instruments are variables too: each movement they are a little
+        # further along in becoming something else, under the drift drive.
+        playing = [build_voice_state(voice, seed, index, drives.timbre_drift)
+                   for voice in voices]
+        states.extend((spec.voice_id, index, spec) for spec in playing)
+
         working = _reharmonise(progression, seed, index, drives, scale)
         ledger = _harmony_promises(ledger, working, scale, cursor)
 
@@ -289,7 +318,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         past = tuple(shapes[1:PAST_WINDOW + 1])
         written = write.write_movement(
             seed, index, movement, cursor, scale, root_pitch, working, chord_beats,
-            current_motif, voices, kit, figures, drives, taste, lineage, heard, approach,
+            current_motif, playing, kit, figures, drives, taste, lineage, heard_pairs, approach,
             ledger, cursor / max(total, 1e-6),
             past, tuple(shapes[-VOCABULARY_WINDOW:]),
             measure.baseline(past, tuple(shapes[:1])), ticking,
@@ -299,7 +328,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         ghosts.extend(written.ghosts)
         melodies.extend(written.choices)
         shapes.extend(_shape_of(choice) for choice in written.choices)
-        lineage, heard, approach = written.lineage, written.heard, written.approach
+        lineage, heard_pairs, approach = written.lineage, written.heard, written.approach
         ledger = written.ledger
 
         # What it played is what it now believes belongs there. This is the
@@ -323,7 +352,8 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         evolution=tuple(history), final_drives=drives,
         melodies=tuple(melodies), patterns=tuple(patterns),
         grids=tuple(grids.values()), retunings=tuple(retunings),
-        clocks=tuple(ticking.values()),
+        clocks=tuple(ticking.values()), states=tuple(states),
+        heard=tuple(listened),
         taste=taste, opening_taste=opening_taste, groove=groove,
         ledger=ledger.forget(cursor),
         reveal=_reveal_of(tuple(shapes), movements),
@@ -358,6 +388,14 @@ def _reharmonise(base: tuple[Chord, ...], seed: int, index: int, drives: Drives,
             degree = (degree + move) % len(scale)
         out.append(Chord(degree=degree, size=size))
     return tuple(out)
+
+
+def build_voice_state(voice: VoiceSpec, seed: int, movement: int,
+                      amount: float) -> VoiceSpec:
+    """This voice as it stands in this movement."""
+    from compex.generate.palette import drift
+
+    return drift(voice, seed, movement, amount)
 
 
 def _shape_of(choice: Choice) -> Shape:

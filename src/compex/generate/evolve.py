@@ -42,6 +42,8 @@ POLARITY: dict[str, int] = {
     "motif_presence": +1,
     "revelation": +1,       # explaining too little of itself wants more recall
     "crowding": -1,         # too crowded means push the voices further apart
+    "heard_roughness": +1,  # too smooth means allow more dissonance
+    "heard_motion": +1,     # a still timbre means move it
 }
 
 #: How far one unit of error moves each drive before plasticity scales it.
@@ -54,6 +56,7 @@ SENSITIVITY: dict[str, float] = {
     "density_bias": 0.30,
     "motif_recall": 0.40,
     "spacing": 0.32,
+    "timbre_drift": 0.30,
 }
 
 #: Where a drive starts out allowed to go. Under sustained strain these give.
@@ -66,6 +69,7 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "density_bias": (0.35, 1.9),
     "motif_recall": (0.0, 1.0),
     "spacing": (0.0, 1.0),
+    "timbre_drift": (0.0, 1.0),
 }
 
 #: Where a drive can never go, however hard the music pushes. These are the
@@ -80,6 +84,7 @@ HARD_BOUNDS: dict[str, tuple[float, float]] = {
     "density_bias": (0.20, 3.00),
     "motif_recall": (0.0, 1.0),
     "spacing": (0.0, 1.6),
+    "timbre_drift": (0.0, 1.4),
 }
 
 PLASTICITY_BOUNDS = (0.15, 1.40)
@@ -106,6 +111,7 @@ class Drives:
     density_bias: float = 1.00
     motif_recall: float = 0.30
     spacing: float = 0.35
+    timbre_drift: float = 0.25
     plasticity: float = 0.50
     unrest: float = 0.00
     fatigue: tuple[tuple[str, float], ...] = ()
@@ -147,6 +153,7 @@ class Drives:
                 f"pull {self.register_pull:.2f} · reach {self.register_reach:.2f} · "
                 f"dissonance {self.dissonance_ceiling:.2f} · density {self.density_bias:.2f} · "
                 f"recall {self.motif_recall:.2f} · spacing {self.spacing:.2f} · "
+                f"timbre {self.timbre_drift:.2f} · "
                 f"plasticity {self.plasticity:.2f}")
         past = self.beyond_start()
         return line + (f" · past its starting range: {', '.join(past)}" if past else "")
@@ -223,6 +230,8 @@ def initial_drives(mood: Mood, root_pitch: int) -> Drives:
         # A crowded mood starts with its voices further apart, because that is
         # where it is going to end up anyway.
         spacing=0.2 + mood.density * 0.5,
+        # A gritty, restless piece expects its instruments to change under it.
+        timbre_drift=0.12 + mood.grit * 0.4 + mood.energy * 0.2,
         plasticity=0.35 + mood.tension * 0.3,
         unrest=0.0,
         fatigue=(),

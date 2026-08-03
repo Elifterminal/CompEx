@@ -251,6 +251,7 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
             velocity=_clamp(velocity + rng.between(seed, f"{stream}-v", position, -0.12, 0.12),
                             0.08, 1.0),
             voice=voice.voice_id,
+            timbre=index,
         ))
         offset += length
 
@@ -333,7 +334,7 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
         pitches = [base + step for step in chord.semitones(scale)]
         return [
             Note(start=start, duration=span, pitch=_in_range(float(pitch)),
-                 velocity=velocity * 0.7, voice=voice.voice_id)
+                 velocity=velocity * 0.7, voice=voice.voice_id, timbre=movement_index)
             for pitch in pitches
         ]
 
@@ -346,7 +347,8 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
             return []
         pitch = _in_range(float(base + theory.degree_semitone(scale, chord.degree + 4)))
         return [Note(start=start, duration=span * 0.9, pitch=pitch,
-                     velocity=velocity * 0.55, voice=voice.voice_id)]
+                     velocity=velocity * 0.55, voice=voice.voice_id,
+                     timbre=movement_index)]
 
     return []
 

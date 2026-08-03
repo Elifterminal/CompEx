@@ -77,6 +77,8 @@ class Session:
             "ghosts": report.ghosts(self.composition, self.ghost_gain),
             "tuning": report.tuning(self.composition),
             "clocks": report.clocks(self.composition),
+            "heard": report.heard(self.composition),
+            "timbre": report.timbre(self.composition),
             "mix": report.mix(self.mix),
             "hindsight": report.hindsight(self.composition),
         }

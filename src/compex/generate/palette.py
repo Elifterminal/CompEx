@@ -14,7 +14,7 @@ identically twice.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from compex import rng
 from compex.dsp.effects import EFFECT_NAMES
@@ -179,6 +179,48 @@ class VoiceSpec:
 
     def effect_names(self) -> tuple[str, ...]:
         return tuple(name for name, _ in self.effects)
+
+
+#: Parameters that must not be moved by the timbre drive, per engine family.
+#: Not a taste judgement — these are the ones where a small relative change is
+#: a large structural one: a vowel is a vowel, a partial count is an integer,
+#: and a filter that moves under a resonance sweep whistles.
+FIXED: frozenset[str] = frozenset({
+    "f1", "f2", "f1b", "f2b", "partials", "layers", "singers", "bits", "wave",
+})
+
+#: How far a parameter may drift from where it started, as a multiplier.
+DRIFT_FLOOR, DRIFT_CEILING = 0.4, 2.6
+
+
+def drift(spec: VoiceSpec, seed: int, movement: int, amount: float) -> VoiceSpec:
+    """The same instrument, a little further along in becoming something else.
+
+    A player is stuck with the instrument they brought. A machine is not, and
+    keeping its voices fixed for eight minutes was never a decision — it was
+    an assumption inherited from ensembles made of people. The synthesis
+    parameters are now moved by a drive like everything else, and the drift is
+    cumulative in the movement index, so a voice arrives somewhere rather than
+    wobbling in place.
+
+    Structural parameters are held: moving a formant pair by 20% is a different
+    vowel, moving a partial count is a different instrument entirely, and
+    neither is what "the same voice, changed" means.
+    """
+    if amount <= 0.0 or not spec.params:
+        return spec
+
+    moved: list[tuple[str, float]] = []
+    for name, value in spec.params:
+        if name in FIXED or value == 0:
+            moved.append((name, value))
+            continue
+        walk = 0.0
+        for step in range(1, movement + 1):
+            walk += rng.between(seed, f"drift-{spec.voice_id}-{name}", step, -0.22, 0.22)
+        factor = max(DRIFT_FLOOR, min(DRIFT_CEILING, 1.0 + walk * amount))
+        moved.append((name, value * factor))
+    return replace(spec, params=tuple(moved))
 
 
 def choose_engine(seed: int, index: int, role: str, mood: Mood) -> str:

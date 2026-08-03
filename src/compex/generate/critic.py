@@ -32,6 +32,7 @@ import math
 from dataclasses import dataclass
 from typing import Sequence
 
+from compex.dsp.listen import Heard
 from compex.generate.material import Note, Stroke
 from compex.generate.mood import Mood
 from compex.generate.theory import Motif
@@ -66,6 +67,9 @@ class Analysis:
     motif_presence: float      # how much of the germ's contour is still audible
     revelation: float = 0.5    # share of its own opening the piece has since explained
     crowding: float = 0.0      # how much the voices are sitting on top of each other
+    heard_roughness: float = 0.04   # beating partials in the rendered sound
+    heard_brightness: float = 0.5   # where the energy actually sits
+    heard_motion: float = 0.5       # how much the timbre moves, frame to frame
 
     def is_empty(self) -> bool:
         return self.note_count < MIN_NOTES
@@ -148,6 +152,22 @@ PRINCIPLES: tuple[Principle, ...] = (
         "entirely means the piece stopped being about anything.",
     ),
     Principle(
+        "heard_roughness", "Plomp & Levelt, sensory dissonance", 0.0, 0.09,
+        "dissonance_ceiling",
+        "Dissonance measured in the sound rather than in the interval. Two "
+        "notes a semitone apart are one number to a symbolic critic whether "
+        "they are played by flutes or by sawtooth pads, and those are not the "
+        "same event. This counts partials close enough together to beat, which "
+        "is what roughness physically is.",
+    ),
+    Principle(
+        "heard_motion", "spectral flux", 0.30, 0.85, "timbre_drift",
+        "How much the sound itself changes, frame to frame. A piece whose "
+        "timbre never moves stops rewarding attention however much its notes "
+        "move — and unlike a player with one instrument, this can do something "
+        "about it.",
+    ),
+    Principle(
         "crowding", "auditory stream segregation", 0.0, 0.45, "spacing",
         "Two voices in the same octave playing at the same time are heard as "
         "one thicker voice, not as two. The mixer can only make that thicker "
@@ -168,8 +188,9 @@ PRINCIPLES: tuple[Principle, ...] = (
 
 
 def analyse(notes: Sequence[Note], strokes: Sequence[Stroke], motif: Motif,
-            scale: tuple[int, ...], root_pitch: int, upto_beat: float,
-            lead_voices: frozenset[str], revelation: float = 0.5) -> Analysis:
+            scale: tuple[float, ...], root_pitch: int, upto_beat: float,
+            lead_voices: frozenset[str], revelation: float = 0.5,
+            heard: "Heard | None" = None) -> Analysis:
     """Measure everything written before ``upto_beat``.
 
     ``revelation`` is handed in rather than computed here: it is a property of
@@ -214,6 +235,9 @@ def analyse(notes: Sequence[Note], strokes: Sequence[Stroke], motif: Motif,
         motif_presence=_motif_presence(pitches, motif),
         revelation=revelation,
         crowding=_crowding(played, upto_beat),
+        heard_roughness=heard.roughness if heard else 0.04,
+        heard_brightness=heard.brightness if heard else 0.5,
+        heard_motion=heard.motion if heard else 0.5,
     )
 
 
@@ -283,6 +307,15 @@ def _band_for(principle: Principle, mood: Mood) -> tuple[float, float]:
         # Hypnotic wants far more self-similarity than frantic does.
         centre = 0.62 - mood.energy * 0.34
         return max(0.0, centre - 0.24), min(1.0, centre + 0.26)
+    if principle.name == "heard_roughness":
+        # A serene piece should have almost no beating in it; a shattered one
+        # is allowed to grind. The numbers are small because real music mostly
+        # avoids clusters — calibrated against tones, where a semitone dyad
+        # reads 0.27 and a fifth reads zero.
+        return 0.0, 0.03 + mood.tension * 0.16 + mood.grit * 0.06
+    if principle.name == "heard_motion":
+        centre = 0.42 + mood.energy * 0.25
+        return max(0.0, centre - 0.22), min(1.0, centre + 0.25)
     return low, high
 
 

@@ -234,6 +234,44 @@ def clocks(composition: Composition) -> dict:
     }
 
 
+def heard(composition: Composition) -> dict:
+    """What the piece measured by listening to itself, movement by movement."""
+    return {
+        "movements": [{"roughness": round(reading.roughness, 4),
+                       "brightness": round(reading.brightness, 4),
+                       "motion": round(reading.motion, 4)}
+                      for reading in composition.heard],
+        "note": composition.heard[-1].describe() if composition.heard else "not listened to",
+    }
+
+
+def timbre(composition: Composition) -> dict:
+    """How far each instrument travelled from what it started as."""
+    first = {name: dict(spec.params) for name, movement, spec in composition.states
+             if movement == 0}
+    latest = max((movement for _, movement, _ in composition.states), default=0)
+    last = {name: dict(spec.params) for name, movement, spec in composition.states
+            if movement == latest}
+
+    voices = []
+    for name, start in first.items():
+        end = last.get(name, start)
+        moved = [(key, start[key], end[key]) for key in start
+                 if key in end and start[key] and abs(end[key] - start[key]) > 1e-9]
+        if not moved:
+            continue
+        travel = sum(abs(new - old) / abs(old) for _, old, new in moved) / len(moved)
+        voices.append({
+            "voice": name,
+            "travel": round(travel, 4),
+            "params": [{"name": key, "from": round(old, 4), "to": round(new, 4)}
+                       for key, old, new in sorted(
+                           moved, key=lambda row: -abs(row[2] - row[1]) / abs(row[1]))[:4]],
+        })
+    return {"voices": sorted(voices, key=lambda row: -row["travel"]),
+            "movements": latest + 1}
+
+
 def ghosts(composition: Composition, gain: float = 0.0) -> dict:
     """The lines the composer decided against, and how loudly they are heard."""
     spb = composition.seconds_per_beat

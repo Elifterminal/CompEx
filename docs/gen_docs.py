@@ -1620,11 +1620,57 @@ clocks is legitimately what was asked for and may still be unlistenable. The moo
 serene stays in twelve and on one clock — but where the line sits is a guess, and only listening
 settles it.</div>
 
-<div class="q"><b>Open: the critic still measures roughness on an interpolated twelve-tone
-table.</b> It is generalised — a neutral third lands between the minor and major one rather than
-being rounded to whichever is nearer — but a real model would work from the partials of the actual
-voices. In a just tuning the whole point is that those partials coincide, and nothing measures
-that yet.</div>
+<h3>It works its scales out too</h3>
+<p>The named modes were the last table in the project that decided anything musical. They are
+still here, demoted to what they should always have been — <b>names for shapes, checked
+afterwards</b>. The machine assembles a set of degrees out of whatever grid it is on, scored on
+four things it can check for itself: is there a strong interval near a fifth holding it together;
+are there steps of more than one size, because a set of equal steps has no positions in it; is
+every gap small enough to step through; and does one interval recur often enough that harmony has
+something to be <i>about</i> — which is the property that actually makes the diatonic scale
+special, and is measurable without knowing its name.</p>
+
+<div class="read ok"><b>Most of what it invents has no name</b>, and occasionally it reinvents one:
+the page reports "which is in sen" when that happens, and "a set with no common name" when it does
+not. The table is commentary now.</div>
+
+<h3>And it listens to itself</h3>
+<div class="read"><b>Everything the critic judged, until now, it judged from symbols.</b> Two notes
+a semitone apart are one number whether they are played by flutes or by sawtooth pads with eleven
+partials each — and those are not the same event. So each movement, a short window of what was
+actually written is rendered at a quarter rate and measured: <b>roughness</b> from partials close
+enough together to beat (Plomp &amp; Levelt&rsquo;s curve, peaking about a quarter of a critical
+band apart), <b>brightness</b> as a spectral centroid, and <b>motion</b> as how much the spectrum
+changes frame to frame.</div>
+
+<p class="sub">Calibrated against tones with known answers, which is the only way to catch this
+class of error: a unison and a fifth read 0.00, a just third 0.05, a semitone dyad 0.27, a
+four-tone cluster 0.36.</p>
+
+<div class="read warn"><b>Both calibration failures are worth recording.</b> The first version
+scored a unison as rough as a semitone — it took the twenty loudest bins as twenty partials, and a
+single pure tone leaks across several of them. The second, after fixing that, reported every
+low-register dissonance as perfectly smooth: two tones a semitone apart at 220 Hz are thirteen
+hertz apart, and the analysis window was too coarse to see them as two things. Neither would have
+been visible in a piece of music, because a piece of music has no known answer to check against.</div>
+
+<h3>Instruments that change while they play</h3>
+<p>A player is stuck with the instrument they brought. Keeping a voice's synthesis parameters fixed
+for eight minutes was never a decision — it was an assumption inherited from ensembles made of
+people. The parameters are drives now, moved by the <code>timbre_drift</code> drive under the
+critic, cumulatively across movements so a voice <i>arrives</i> somewhere rather than wobbling in
+place. Structural parameters are held: moving a formant pair is a different vowel, not the same
+voice changed.</p>
+
+<div class="read"><b>What closes that loop is the listening.</b> The <code>heard_motion</code>
+principle measures whether the sound is actually changing, and pushes the drift drive when it is
+not — which is a thing the symbolic critic could never have asked for, because it cannot hear.</div>
+
+<div class="q"><b>Open: the drift moves the instruments more than it moves the measurement.</b> At
+full drive the parameters travel about 21% and the measured spectral motion rises from 0.44 to
+0.47 — real, and much smaller than the cause. Note changes dominate the flux, so the loop closes
+weakly. Either the measure needs to separate timbre from notes, or the drift needs to reach
+parameters that matter more.</div>
 """
 
 

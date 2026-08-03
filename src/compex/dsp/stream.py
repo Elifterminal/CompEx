@@ -182,14 +182,14 @@ def finish(carry: np.ndarray | None, level: Level | None,
 
 
 def _voices_in_span(bus, composition, span, seconds_per_beat, total, trims=None) -> None:
-    specs = {v.voice_id: v for v in composition.voices if v.role != ROLE_PERC}
-    grouped: dict[str, list] = {}
+    percussion = {v.voice_id for v in composition.voices if v.role == ROLE_PERC}
+    grouped: dict[tuple[str, int], list] = {}
     for note in composition.notes:
-        if span.start_beat <= note.start < span.end_beat:
-            grouped.setdefault(note.voice, []).append(note)
+        if span.start_beat <= note.start < span.end_beat and note.voice not in percussion:
+            grouped.setdefault((note.voice, note.timbre), []).append(note)
 
-    for voice_id, notes in grouped.items():
-        spec = specs.get(voice_id)
+    for (voice_id, timbre), notes in grouped.items():
+        spec = composition.state(voice_id, timbre)
         if spec is None:
             continue
         scratch = np.zeros(total, dtype=np.float64)
