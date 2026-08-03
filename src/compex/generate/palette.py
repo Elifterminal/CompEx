@@ -223,7 +223,8 @@ def drift(spec: VoiceSpec, seed: int, movement: int, amount: float) -> VoiceSpec
     return replace(spec, params=tuple(moved))
 
 
-def choose_engine(seed: int, index: int, role: str, mood: Mood) -> str:
+def choose_engine(seed: int, index: int, role: str, mood: Mood,
+                  bored: dict[str, float] | None = None) -> str:
     """Pick an engine for ``role`` whose character sits near the mood.
 
     Roles that have to hold a note only draw from engines that actually do.
@@ -241,20 +242,30 @@ def choose_engine(seed: int, index: int, role: str, mood: Mood) -> str:
         if holding:
             candidates = holding
 
+    # Anything reached for lately is pushed down the ranking. Not banned —
+    # a piece may still want the obvious instrument — but an engine that has
+    # made the last six pieces has to be a better fit than one that has not.
+    stale = bored or {}
+
     target = (mood.valence, mood.grit, mood.energy)
+    # Anything reached for lately is pushed down the ranking. Not banned — a
+    # piece may still want the obvious instrument — but an engine that made the
+    # last six pieces has to fit better than one that did not.
+    stale = bored or {}
     ranked = sorted(
         candidates,
         key=lambda name: sum(
             (component - aim) ** 2 for component, aim in zip(ENGINE_COLOUR[name], target)
-        ),
+        ) + stale.get(name, 0.0),
     )
     return rng.pick(seed, f"engine-{role}", index, ranked[: min(CANDIDATE_POOL, len(ranked))])
 
 
 def build_voice(seed: int, index: int, role: str, mood: Mood,
-                engine: str | None = None) -> VoiceSpec:
+                engine: str | None = None,
+                bored: dict[str, float] | None = None) -> VoiceSpec:
     """Invent a full instrument for ``role`` — engine, parameters and effects."""
-    engine = engine or choose_engine(seed, index, role, mood)
+    engine = engine or choose_engine(seed, index, role, mood, bored)
     stream = f"voice-{role}-{index}"
     params = _PARAM_BUILDERS[engine](seed, stream, mood)
 

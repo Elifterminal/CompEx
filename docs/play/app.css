@@ -230,3 +230,7 @@ button:disabled, .button.disabled { opacity: .4; pointer-events: none; }
   body { max-width: 760px; margin: 0 auto; }
   .dock { left: 50%; transform: translateX(-50%); max-width: 760px; border-radius: 12px 12px 0 0; }
 }
+
+/* memory */
+.memory { margin-bottom: 10px; }
+.memory button { margin-top: 6px; }

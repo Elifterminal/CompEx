@@ -45,9 +45,13 @@ def _header(composition: Composition, runtime: float) -> str:
         f"\\mathrm{{{axis[0]}}}\\,{getattr(mood, axis):.2f}"
         for axis in ("valence", "energy", "tension", "density", "grit")
     )
+    remembered = composition.memory
+    lineage = ("" if remembered.is_blank() else
+               f",\\qquad\\mathrm{{MEMORY}}=\\mathrm{{{remembered.digest()}}}"
+               f"\\ ({remembered.pieces}\\mathrm{{\\ pieces}})")
     return (
         f"\\mathrm{{SEED}}={composition.seed},\\qquad"
-        f"\\mathrm{{RUNTIME}}={runtime:.0f}\\mathrm{{\\ s}}\n\n"
+        f"\\mathrm{{RUNTIME}}={runtime:.0f}\\mathrm{{\\ s}}{lineage}\n\n"
         f"\\mathrm{{MOOD}}=\\left({axes}\\right)"
         f"\\ \\approx\\ \\mathrm{{{mood.nearest_theme()}}}"
     )

@@ -22,6 +22,12 @@ SAMPLE_WIDTH_BYTES = 2  # 16-bit PCM
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = Path.home() / "compex" / "out"
 
+#: Where the engine keeps what it remembers between pieces. A plain JSON file
+#: on purpose: it is an input to composition, so it has to be something you can
+#: read, diff, copy to another machine, or delete when you want the engine to
+#: start again from nothing.
+MEMORY_PATH = OUTPUT_DIR / "memory.json"
+
 #: Guard rails for every numeric knob: name -> (minimum, maximum).
 KNOB_RANGES: dict[str, tuple[float, float]] = {
     "seed": (0, 2**31 - 1),

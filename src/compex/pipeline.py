@@ -18,6 +18,7 @@ from compex.config import SAMPLE_RATE, Knobs
 from compex.dsp.arrange import ProgressFn, render_composition, survey
 from compex.dsp.balance import Mix
 from compex.generate import Composition, Mood, compose
+from compex.remember import Memory, learn
 from compex.notation import emit
 
 
@@ -29,6 +30,10 @@ class RenderResult:
     knobs: Knobs
     mood: Mood
     mix: Mix = Mix()
+    #: What the engine now remembers, this piece included. Callers that keep a
+    #: history save this back; callers that do not simply drop it, and the next
+    #: piece starts from nothing exactly as it always did.
+    memory: Memory = Memory()
 
     @property
     def duration_s(self) -> float:
@@ -60,9 +65,10 @@ class RenderResult:
         return destination
 
 
-def make_track(knobs: Knobs, mood: Mood, progress: ProgressFn = None) -> RenderResult:
+def make_track(knobs: Knobs, mood: Mood, progress: ProgressFn = None,
+               memory: Memory = Memory()) -> RenderResult:
     """Invent a piece for these settings and render it."""
-    composition = compose(knobs.seed, knobs.duration_s, mood)
+    composition = compose(knobs.seed, knobs.duration_s, mood, memory)
     samples = render_composition(composition, knobs.master_gain, progress=progress,
                                  ghost_gain=knobs.ghost_gain)
     return RenderResult(
@@ -72,4 +78,5 @@ def make_track(knobs: Knobs, mood: Mood, progress: ProgressFn = None) -> RenderR
         knobs=knobs,
         mood=mood,
         mix=survey(composition),
+        memory=learn(memory, composition),
     )

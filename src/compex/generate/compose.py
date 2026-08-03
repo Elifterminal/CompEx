@@ -56,8 +56,9 @@ from compex.generate.promise import Ledger
 from compex.generate.theory import Chord, Motif
 from compex.generate.clocks import Clock
 from compex.generate.tuning import Tuning
-from compex import measure
+from compex import measure, remember
 from compex.dsp import listen
+from compex.remember import Memory
 from compex.measure import Reveal, Shape
 
 MIN_BPM, MAX_BPM = 52.0, 168.0
@@ -124,6 +125,7 @@ class Composition:
     #: Instruments drift now, so one spec per voice is no longer the whole truth.
     states: tuple[tuple[str, int, VoiceSpec], ...] = ()
     heard: tuple[listen.Heard, ...] = ()
+    memory: Memory = Memory()
     taste: Taste = Taste()
     opening_taste: Taste = Taste()
     groove: Groove = Groove()
@@ -199,6 +201,7 @@ class Composition:
             f" · {moved} rhythm grid(s) past their starting weights",
             f"promises: {self.ledger.summary(self.total_beats)}",
             "heard: " + (self.heard[-1].describe() if self.heard else "not listened to"),
+            f"memory: {self.memory.describe()}",
             f"ghosts: {len(self.ghosts)} notes it decided against, kept audible",
             "clocks: " + clockwork.summary({c.voice: c for c in self.clocks},
                                            float(self.beats_per_bar)),
@@ -208,8 +211,17 @@ class Composition:
         ])
 
 
-def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
-    """Invent a piece. Same arguments in, same piece out, always."""
+def compose(seed: int, duration_s: float, mood: Mood,
+            memory: Memory = Memory()) -> Composition:
+    """Invent a piece. Same arguments in, same piece out, always.
+
+    ``memory`` is what the engine carries from the pieces it has already made:
+    where its taste ended up, and what it has been reaching for lately. It is
+    an *argument* rather than hidden state, which is the only way it can exist
+    at all here — determinism is the property everything else rests on, and a
+    hidden accumulator would have broken it silently. Same seed, same mood,
+    same memory digest, same audio; the digest is printed in the formula.
+    """
     if duration_s <= 0:
         raise ValueError(f"duration must be positive, got {duration_s}")
     if not isinstance(mood, Mood):
@@ -220,7 +232,9 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     root_pitch = 36 + int(rng.uniform(seed, "root", 0) * 12)
 
     # The twelve-tone grid is a table, not a fact — so it picks its own.
-    voicing = tuning.derive(seed, mood)
+    stale_tunings = {name: remember.bored_of(memory, "tunings", name)
+                     for name in ("twelve", "equal", "just")}
+    voicing = tuning.derive(seed, mood, bored=stale_tunings)
     scale_name, scale = voicing.name, voicing.steps
 
     chord_count = max(2, min(8, 2 + int(mood.density * 6.5)))
@@ -232,16 +246,16 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     archetype = _archetype(seed, mood)
 
     movements = _movements(seed, duration_s, bpm, beats_per_bar, mood, archetype)
-    voices = _voices(seed, mood)
+    voices = _voices(seed, mood, memory)
     kit = build_kit(seed, mood)
     grids = _grids(seed, kit, voices, beats_per_bar, mood)
     ticking = clockwork.assign(seed, voices, kit, mood)
     lead_voices = frozenset(v.voice_id for v in voices if v.role == ROLE_LEAD)
 
     drives = initial_drives(mood, root_pitch)
-    opening_taste = melody.initial_taste(mood)
+    opening_taste = _remembered_taste(melody.initial_taste(mood), memory)
     taste = opening_taste
-    groove = pattern.initial_groove(mood)
+    groove = _remembered_groove(pattern.initial_groove(mood), memory)
 
     notes: list[Note] = []
     strokes: list[Stroke] = []
@@ -354,7 +368,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
         grids=tuple(grids.values()), retunings=tuple(retunings),
         clocks=tuple(ticking.values()), states=tuple(states),
         heard=tuple(listened),
-        taste=taste, opening_taste=opening_taste, groove=groove,
+        taste=taste, opening_taste=opening_taste, groove=groove, memory=memory,
         ledger=ledger.forget(cursor),
         reveal=_reveal_of(tuple(shapes), movements),
     )
@@ -551,15 +565,40 @@ def _movement_name(energy: float, index: int, count: int, tension: float) -> str
     return "break"
 
 
-def _voices(seed: int, mood: Mood) -> list[VoiceSpec]:
-    voices = [build_voice(seed, 0, ROLE_BASS, mood)]
+def _voices(seed: int, mood: Mood, memory: Memory = Memory()) -> list[VoiceSpec]:
+    bored = {name: remember.bored_of(memory, "engines", name)
+             for name, _ in memory.engines}
+    voices = [build_voice(seed, 0, ROLE_BASS, mood, bored=bored)]
     if mood.density > 0.12:
-        voices.append(build_voice(seed, 1, ROLE_LEAD, mood))
+        voices.append(build_voice(seed, 1, ROLE_LEAD, mood, bored=bored))
     for slot in range(1 + int(mood.density * 2.2)):
-        voices.append(build_voice(seed, 2 + slot, ROLE_PAD, mood))
+        voices.append(build_voice(seed, 2 + slot, ROLE_PAD, mood, bored=bored))
     if mood.density > 0.48:
-        voices.append(build_voice(seed, 8, ROLE_TEXTURE, mood))
+        voices.append(build_voice(seed, 8, ROLE_TEXTURE, mood, bored=bored))
     return voices
+
+
+def _remembered_taste(fresh: Taste, memory: Memory) -> Taste:
+    """Start listening for what past pieces learned to listen for."""
+    if memory.is_blank():
+        return fresh
+    from dataclasses import replace as _replace
+
+    return _replace(fresh, **{
+        name: remember.lean(memory, "taste", value, name)
+        for name, value in fresh.weights()
+    })
+
+
+def _remembered_groove(fresh: Groove, memory: Memory) -> Groove:
+    if memory.is_blank():
+        return fresh
+    from dataclasses import replace as _replace
+
+    return _replace(fresh, **{
+        name: remember.lean(memory, "groove", value, name)
+        for name, value in fresh.weights()
+    })
 
 
 def _grids(seed: int, kit: tuple[VoiceSpec, ...], voices: list[VoiceSpec],

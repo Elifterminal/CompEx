@@ -98,6 +98,14 @@
      toward whatever it actually played, so a slot it keeps choosing ends up weighing more
      than the meter ever gave it.</p>
 
+  <h3 class="sub">What it remembers</h3>
+  <div id="memory" class="memory"></div>
+  <p class="note">Every piece this app makes is folded into a history at
+     <code>~/compex/out/memory.json</code>, and the next one starts from it: taste leans toward
+     where past pieces ended up, and anything it has been reaching for lately gets pushed down the
+     ranking. It is a file rather than hidden state because it is an <i>input</i> — same seed, same
+     mood, same digest, same music. Delete the file and the engine starts again from nothing.</p>
+
   <h3 class="sub">What it tuned itself to</h3>
   <div id="tuning" class="tuning"></div>
   <p class="note">Twelve notes to the octave is a fact about keyboards, not about music, and there

@@ -16,6 +16,17 @@ const KEEP_LIMIT_S = 480;    // stop keeping audio for saving past 8 minutes
 
 const $ = (id) => document.getElementById(id);
 
+/* What this browser remembers about the pieces it has already made. It is an
+ * input to composition, not hidden state — same seed, same mood, same digest,
+ * same music — so it lives somewhere the listener can see and clear. */
+const MEMORY_KEY = "compex.memory";
+const loadMemory = () => {
+  try { return window.localStorage.getItem(MEMORY_KEY) || ""; } catch (e) { return ""; }
+};
+const saveMemory = (text) => {
+  try { window.localStorage.setItem(MEMORY_KEY, text); } catch (e) { /* private mode */ }
+};
+
 const state = {
   py: null, web: null, cat: null,
   mood: {}, theme: null,
@@ -150,7 +161,8 @@ async function play() {
   let info;
   try {
     info = JSON.parse(state.web.start(seed, seconds, JSON.stringify(state.mood), 8.0,
-                                      Number($("ghost").value)));
+                                      Number($("ghost").value), loadMemory()));
+    saveMemory(state.web.memory_text());
   } catch (err) {
     console.error(err);
     setStatus(`could not compose: ${err.message || err}`, "err");
@@ -305,6 +317,21 @@ function drawChoices(info) {
       <div class="cells">${cells}</div>
     </div>`;
   }).join("");
+
+  const remembered = info.memory;
+  if (remembered) {
+    $("memory").innerHTML = remembered.pieces
+      ? `<h3 class="mini">what it remembers</h3>
+         <div class="hint">${remembered.note}</div>
+         <button id="forget" class="ghost">forget everything</button>`
+      : `<h3 class="mini">what it remembers</h3>
+         <div class="hint">nothing yet — this is its first piece on this device</div>`;
+    const forget = $("forget");
+    if (forget) forget.addEventListener("click", () => {
+      saveMemory("");
+      $("memory").innerHTML = `<div class="hint">forgotten. the next piece starts from nothing.</div>`;
+    });
+  }
 
   const tuning = info.tuning;
   if (tuning) {

@@ -234,6 +234,24 @@ def clocks(composition: Composition) -> dict:
     }
 
 
+def memory(composition: Composition, learned=None) -> dict:
+    """What the piece was written with, and what the engine knows now."""
+    before = composition.memory
+    return {
+        "pieces": before.pieces,
+        "digest": before.digest(),
+        "note": before.describe(),
+        "reaching_for": [{"name": name, "weight": round(value, 3)}
+                         for name, value in sorted(before.engines,
+                                                   key=lambda pair: -pair[1])[:6]],
+        "tunings": [{"name": name, "weight": round(value, 3)}
+                    for name, value in sorted(before.tunings,
+                                              key=lambda pair: -pair[1])[:5]],
+        "after": (learned.as_dict() if learned is not None else None),
+        "after_digest": (learned.digest() if learned is not None else None),
+    }
+
+
 def heard(composition: Composition) -> dict:
     """What the piece measured by listening to itself, movement by movement."""
     return {

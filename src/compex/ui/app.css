@@ -291,3 +291,6 @@ pre { margin: 8px 0 0; font-size: 11.5px; color: var(--dim); white-space: pre-wr
 .dbar i { display: block; height: 100%; border-radius: 999px; background: var(--dim); }
 .degree.off .dbar i { background: var(--warn); }
 .degree.off .dcents { color: var(--warn); }
+
+/* memory */
+.memory { margin-bottom: 6px; }

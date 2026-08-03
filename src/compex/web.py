@@ -22,6 +22,7 @@ from compex.dsp.stream import DEFAULT_SPAN_SECONDS, Level, finish, plan, render_
 from compex.generate import THEMES, compose
 from compex.generate.mood import AXES, Mood, theme_names
 from compex.notation import emit
+from compex.remember import Memory, learn
 
 SAMPLE_RATE = 44_100
 
@@ -31,8 +32,12 @@ class Session:
 
     def __init__(self, seed: int, duration_s: float, mood: dict | str | None,
                  span_seconds: float = DEFAULT_SPAN_SECONDS,
-                 master_gain: float = 0.89, ghost_gain: float = 0.35) -> None:
-        self.composition = compose(int(seed), float(duration_s), Mood.parse(mood))
+                 master_gain: float = 0.89, ghost_gain: float = 0.35,
+                 memory: str | dict | None = None) -> None:
+        self.remembered = Memory.parse(memory)
+        self.composition = compose(int(seed), float(duration_s), Mood.parse(mood),
+                                   self.remembered)
+        self.learned = learn(self.remembered, self.composition)
         self.spans = plan(self.composition, float(span_seconds))
         # Once for the piece, not once per span: the balance is a property of
         # the whole thing, and recomputing it mid-stream would make the mix
@@ -75,6 +80,7 @@ class Session:
             "taste": report.taste(self.composition),
             "ledger": report.ledger(self.composition),
             "ghosts": report.ghosts(self.composition, self.ghost_gain),
+            "memory": report.memory(self.composition, self.learned),
             "tuning": report.tuning(self.composition),
             "clocks": report.clocks(self.composition),
             "heard": report.heard(self.composition),
@@ -144,13 +150,19 @@ _samples: np.ndarray | None = None
 
 
 def start(seed: int, duration_s: float, mood_json: str,
-          span_seconds: float = DEFAULT_SPAN_SECONDS, ghost_gain: float = 0.35) -> str:
+          span_seconds: float = DEFAULT_SPAN_SECONDS, ghost_gain: float = 0.35,
+          memory_json: str = "") -> str:
     """Begin a piece. Returns its description as JSON."""
     global _session, _samples
     _samples = None
     _session = Session(seed, duration_s, json.loads(mood_json), span_seconds,
-                       ghost_gain=ghost_gain)
+                       ghost_gain=ghost_gain, memory=memory_json)
     return json.dumps(_session.info())
+
+
+def memory_text() -> str:
+    """What the engine remembers after this piece, for the caller to keep."""
+    return _session.learned.to_json() if _session else Memory().to_json()
 
 
 def step() -> str:

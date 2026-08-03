@@ -205,6 +205,7 @@ function drawChoices(data) {
     : "";
 
   $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  drawMemory(data.memory);
   drawTuning(data.tuning, data.clocks);
   drawGhosts(data.ghosts);
   drawMix(data.mix);
@@ -212,6 +213,25 @@ function drawChoices(data) {
   drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
+}
+
+function drawMemory(memory) {
+  const host = $("memory");
+  if (!memory) { host.innerHTML = ""; return; }
+  if (!memory.pieces) {
+    host.innerHTML = `<p class="note">nothing remembered — this is its first piece</p>`;
+    return;
+  }
+  const reaching = memory.reaching_for.map((e) =>
+    `<span class="chip">${e.name} ${e.weight}</span>`).join("");
+  const tunings = memory.tunings.map((t) =>
+    `<span class="chip">${t.name} ${t.weight}</span>`).join("");
+  host.innerHTML = `<div class="note">${memory.note}</div>
+    <div class="note" style="margin-top:6px">reaching for lately — pushed down the ranking for
+      the next piece:</div><div>${reaching}</div>
+    <div class="note" style="margin-top:6px">tunings it has been living in:</div>
+    <div>${tunings}</div>
+    <div class="note" style="margin-top:6px">after this piece: <code>${memory.after_digest}</code></div>`;
 }
 
 function drawTuning(tuning, clocks) {

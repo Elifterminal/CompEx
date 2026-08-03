@@ -21,10 +21,11 @@ import numpy as np
 
 from compex import __version__, report
 from compex.audio import encode
-from compex.config import OUTPUT_DIR, KnobError, Knobs
+from compex.config import MEMORY_PATH, OUTPUT_DIR, KnobError, Knobs
 from compex.delivery import DEFAULT_RECIPIENT, DeliveryError, send_render
 from compex.generate.mood import AXES, THEMES, Mood, MoodError, theme_names
 from compex.pipeline import make_track
+from compex.remember import Memory
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8733
@@ -103,7 +104,9 @@ class CompexHandler(BaseHTTPRequestHandler):
         if audio_format not in encode.FORMATS:
             raise ValueError(f"unknown format {audio_format!r}")
 
-        result = make_track(knobs, mood)
+        remembered = _load_memory()
+        result = make_track(knobs, mood, memory=remembered)
+        _save_memory(result.memory)
         stem = f"{mood.nearest_theme()}_seed{knobs.seed}_{result.fingerprint}"
         path = result.save(OUTPUT_DIR / stem, audio_format)
         formula_path = result.save_formula(OUTPUT_DIR / stem)
@@ -128,6 +131,7 @@ class CompexHandler(BaseHTTPRequestHandler):
             "taste": report.taste(result.composition),
             "ledger": report.ledger(result.composition),
             "ghosts": report.ghosts(result.composition, knobs.ghost_gain),
+            "memory": report.memory(result.composition, result.memory),
             "tuning": report.tuning(result.composition),
             "clocks": report.clocks(result.composition),
             "heard": report.heard(result.composition),
@@ -223,6 +227,22 @@ def _waveform(samples: np.ndarray, points: int = WAVEFORM_POINTS) -> list[float]
     usable = (len(samples) // bucket) * bucket
     folded = np.abs(samples[:usable]).reshape(-1, bucket).max(axis=1)
     return [round(float(value), 4) for value in folded]
+
+
+def _load_memory() -> Memory:
+    """What this machine remembers. A missing or broken file is simply amnesia."""
+    try:
+        return Memory.parse(MEMORY_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Memory()
+
+
+def _save_memory(memory: Memory) -> None:
+    try:
+        MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        MEMORY_PATH.write_text(memory.to_json() + "\n", encoding="utf-8")
+    except OSError:
+        pass    # a history that cannot be written is not worth failing a render over
 
 
 def _bind(preferred: int) -> ThreadingHTTPServer:

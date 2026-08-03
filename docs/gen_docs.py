@@ -193,6 +193,27 @@ def _crowding_at(spacing: float) -> float:
     return statistics.mean(measured)
 
 
+def memory_survey() -> dict:
+    """Make several pieces from the same seed and mood, and watch it get bored."""
+    from compex.remember import Memory, learn
+
+    memory = Memory()
+    rows = []
+    for index in range(6):
+        piece = compose(2026, 45.0, THEMES["hypnotic"], memory)
+        rows.append({
+            "index": index + 1,
+            "engines": [voice.engine for voice in piece.voices if voice.role != "perc"],
+            "tuning": piece.tuning.name,
+            "digest": memory.digest() if not memory.is_blank() else "—",
+            "pieces": memory.pieces,
+        })
+        memory = learn(memory, piece)
+
+    distinct = len({tuple(row["engines"]) for row in rows})
+    return {"rows": rows, "distinct": distinct, "final": memory}
+
+
 def freedom_survey() -> dict:
     """How often the machine leaves the twelve-tone grid and the shared pulse."""
     from collections import Counter
@@ -1520,9 +1541,16 @@ plays them yet.</div>
 """
 
 
-def panel_free(survey) -> str:
+def panel_free(survey, remembering) -> str:
     from compex.generate.clocks import RATIOS
     from compex.generate.tuning import DIVISIONS, LIMITS
+
+    memory_rows = "".join(
+        f"<tr><td>{row['index']}</td>"
+        f"<td class='sub'>{row['pieces']} remembered · {row['digest']}</td>"
+        f"<td class='sub'>{', '.join(row['engines'])}</td></tr>"
+        for row in remembering["rows"])
+    memory_distinct = remembering["distinct"]
 
     families = survey["families"]
     total = sum(families.values()) or 1
@@ -1614,6 +1642,34 @@ hearing; a ratio needs both of its terms to exist.</div>
 
 <table><thead><tr><th>piece</th><th>voice</th><th>ratio</th><th>meets the pulse every</th></tr>
 </thead><tbody>{clocks}</tbody></table>
+
+<h3>And it remembers what it has already done</h3>
+<div class="read"><b>Every piece used to begin from nothing.</b> The composer learned inside a
+track — taste moved, grids learned, bounds gave way — and then the whole thing was thrown away and
+the next piece started from the same mood-derived defaults as the first. It had made hundreds and
+remembered none of them.</div>
+
+<p>A machine has no excuse for that. Perfect recall of everything it has ever done is one of the
+few advantages it holds outright, and the obvious use for it is the thing people do badly: <b>get
+bored of itself</b>. An engine that reaches for the same five instruments and the same tuning every
+time is not being consistent, it is being stuck.</p>
+
+<p>So a history carries three things forward — where taste ended up, what has been used lately, and
+how many pieces there have been. Taste leans toward where past pieces settled; anything reached for
+recently is pushed down the ranking rather than banned; a family of tuning it has been living in
+makes leaving easier next time. The past decays, so the last handful of pieces matter and the first
+hundred are a rumour.</p>
+
+<div class="read ok"><b>Determinism survives because the memory is an argument, not hidden
+state.</b> Same seed, same mood, same history gives the same audio — and the history's digest is
+printed in the formula next to the seed, so two people with the same seed and different histories
+can see why they have different music. A hidden accumulator would have broken the one property
+everything else here rests on, silently.</div>
+
+<p class="sub">The same seed and the same mood, six times in a row, with the engine remembering:</p>
+<table><thead><tr><th>#</th><th>history</th><th>instruments it chose</th></tr></thead>
+<tbody>{memory_rows}</tbody></table>
+<p class="sub">{memory_distinct} distinct instrumentations out of six, from identical inputs.</p>
 
 <div class="q"><b>Open: how far is too far.</b> A piece in 31-EDO with three voices on different
 clocks is legitimately what was asked for and may still be unlistenable. The mood axes gate both —
@@ -1768,6 +1824,7 @@ def build() -> str:
     mixing = mix_survey()
     haunting = ghost_survey()
     freedom = freedom_survey()
+    remembering = memory_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -1861,7 +1918,7 @@ that was designed and not built.</div>
 <div class="panel" id="purpose">{panel_purpose(purpose, hindsight)}</div>
 <div class="panel" id="mix">{panel_mix(mixing)}</div>
 <div class="panel" id="ghosts">{panel_ghosts(haunting)}</div>
-<div class="panel" id="free">{panel_free(freedom)}</div>
+<div class="panel" id="free">{panel_free(freedom, remembering)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

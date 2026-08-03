@@ -81,14 +81,24 @@ class Tuning:
                                                              if self.detail else "")
 
 
-def derive(seed: int, mood: Mood, stream: str = "tuning") -> Tuning:
+def derive(seed: int, mood: Mood, stream: str = "tuning",
+           bored: dict[str, float] | None = None) -> Tuning:
     """Choose a tuning for this piece.
 
     Leaving twelve is a decision about strangeness, so it is driven by tension
     and grit — a serene piece nearly always stays where the ear is comfortable,
     and a shattered one is free to go somewhere with no name.
+
+    ``bored`` is how much it has been living in each family lately. An engine
+    that has spent its last ten pieces in twelve should find leaving easier,
+    which is a machine's version of wanting a change and is available to it
+    precisely because it remembers every piece it has made.
     """
-    strangeness = 0.55 * mood.tension + 0.3 * mood.grit + 0.15 * (1.0 - mood.valence)
+    stale = bored or {}
+    strangeness = (0.55 * mood.tension + 0.3 * mood.grit + 0.15 * (1.0 - mood.valence)
+                   + 0.35 * stale.get("twelve", 0.0)
+                   - 0.2 * (stale.get("equal", 0.0) + stale.get("just", 0.0)))
+    strangeness = max(0.0, min(1.0, strangeness))
     draw = rng.uniform(seed, f"{stream}-family", 0)
 
     if draw > strangeness:

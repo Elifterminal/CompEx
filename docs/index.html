@@ -890,6 +890,34 @@ hearing; a ratio needs both of its terms to exist.</div>
 <table><thead><tr><th>piece</th><th>voice</th><th>ratio</th><th>meets the pulse every</th></tr>
 </thead><tbody><tr><td><b>serene</b></td><td><code>lead_additive_1</code></td><td>4:3</td><td>9 beats</td></tr><tr><td><b>serene</b></td><td><code>ride</code></td><td>2:3</td><td>9 beats</td></tr><tr><td><b>hypnotic</b></td><td><code>lead_tine_1</code></td><td>4:3</td><td>9 beats</td></tr><tr><td><b>hypnotic</b></td><td><code>pad_bowed_3</code></td><td>5:4</td><td>12 beats</td></tr><tr><td><b>hypnotic</b></td><td><code>texture_bell_8</code></td><td>2:3</td><td>9 beats</td></tr><tr><td><b>hypnotic</b></td><td><code>tom</code></td><td>3:4</td><td>12 beats</td></tr><tr><td><b>menacing</b></td><td><code>lead_reed_1</code></td><td>4:3</td><td>9 beats</td></tr><tr><td><b>menacing</b></td><td><code>pad_tape_3</code></td><td>5:4</td><td>12 beats</td></tr><tr><td><b>menacing</b></td><td><code>texture_formant_8</code></td><td>2:3</td><td>9 beats</td></tr><tr><td><b>menacing</b></td><td><code>snare</code></td><td>3:4</td><td>12 beats</td></tr></tbody></table>
 
+<h3>And it remembers what it has already done</h3>
+<div class="read"><b>Every piece used to begin from nothing.</b> The composer learned inside a
+track — taste moved, grids learned, bounds gave way — and then the whole thing was thrown away and
+the next piece started from the same mood-derived defaults as the first. It had made hundreds and
+remembered none of them.</div>
+
+<p>A machine has no excuse for that. Perfect recall of everything it has ever done is one of the
+few advantages it holds outright, and the obvious use for it is the thing people do badly: <b>get
+bored of itself</b>. An engine that reaches for the same five instruments and the same tuning every
+time is not being consistent, it is being stuck.</p>
+
+<p>So a history carries three things forward — where taste ended up, what has been used lately, and
+how many pieces there have been. Taste leans toward where past pieces settled; anything reached for
+recently is pushed down the ranking rather than banned; a family of tuning it has been living in
+makes leaving easier next time. The past decays, so the last handful of pieces matter and the first
+hundred are a rumour.</p>
+
+<div class="read ok"><b>Determinism survives because the memory is an argument, not hidden
+state.</b> Same seed, same mood, same history gives the same audio — and the history's digest is
+printed in the formula next to the seed, so two people with the same seed and different histories
+can see why they have different music. A hidden accumulator would have broken the one property
+everything else here rests on, silently.</div>
+
+<p class="sub">The same seed and the same mood, six times in a row, with the engine remembering:</p>
+<table><thead><tr><th>#</th><th>history</th><th>instruments it chose</th></tr></thead>
+<tbody><tr><td>1</td><td class='sub'>0 remembered · —</td><td class='sub'>reed, tine, tape, bowed, bell</td></tr><tr><td>2</td><td class='sub'>1 remembered · 91d6f663f075</td><td class='sub'>organ, brass, string, vox, wavetable</td></tr><tr><td>3</td><td class='sub'>2 remembered · 3051f299d4da</td><td class='sub'>pluck, additive, supersaw, choir, aeolian</td></tr><tr><td>4</td><td class='sub'>3 remembered · f6f3254c0729</td><td class='sub'>formant, chime, bowed, pad, formant</td></tr><tr><td>5</td><td class='sub'>4 remembered · af212eb7d420</td><td class='sub'>reed, tine, vox, drone, drone</td></tr><tr><td>6</td><td class='sub'>5 remembered · e35eb5496ba6</td><td class='sub'>tape, wavetable, string, tape, bell</td></tr></tbody></table>
+<p class="sub">6 distinct instrumentations out of six, from identical inputs.</p>
+
 <div class="q"><b>Open: how far is too far.</b> A piece in 31-EDO with three voices on different
 clocks is legitimately what was asked for and may still be unlistenable. The mood axes gate both —
 serene stays in twelve and on one clock — but where the line sits is a guess, and only listening
