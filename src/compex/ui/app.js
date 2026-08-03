@@ -205,12 +205,38 @@ function drawChoices(data) {
     : "";
 
   $("patterns").innerHTML = patterns.map(drawFigure).join("");
+  drawTuning(data.tuning, data.clocks);
   drawGhosts(data.ghosts);
   drawMix(data.mix);
   drawHindsight(data.hindsight);
   drawLedger(data.ledger);
   if (taste) $("taste").innerHTML = taste.criteria.map(drawWeight).join("");
   drawMelody(data.melody || []);
+}
+
+function drawTuning(tuning, clocks) {
+  const host = $("tuning");
+  if (!tuning) { host.innerHTML = ""; return; }
+  const degrees = tuning.cents.map((cents, i) => {
+    const off = tuning.off_grid[i];
+    return `<div class="degree${off > 8 ? " off" : ""}">
+      <span class="dname">${i}</span>
+      <span class="dcents">${cents.toFixed(0)}&cent;</span>
+      <span class="dbar"><i style="width:${Math.min(100, off / 50 * 100)}%"></i></span>
+      <span class="note">${off > 0.5 ? `${off.toFixed(0)}&cent; off the grid` : "on the grid"}</span>
+    </div>`;
+  }).join("");
+
+  const loose = (clocks && clocks.loose) || [];
+  const tempo = loose.length
+    ? `<div class="note" style="margin-top:8px">${loose.length} of ${clocks.voices} voices on their
+       own clock — ` + loose.map((c) =>
+        `<b>${c.voice}</b> at ${c.ratio}, meeting the pulse every ${c.meets_every_seconds}s`
+       ).join("; ") + `</div>`
+    : `<div class="note" style="margin-top:8px">one clock, everything on it</div>`;
+
+  host.innerHTML = `<div class="note"><b>${tuning.name}</b> · ${tuning.degrees} degrees` +
+    (tuning.detail ? ` · ${tuning.detail}` : "") + `</div>${degrees}${tempo}`;
 }
 
 function drawGhosts(ghosts) {

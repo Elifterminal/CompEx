@@ -165,6 +165,8 @@ MIX_SECONDS = 120.0
 GHOST_THEMES = ("serene", "wistful", "hypnotic", "menacing", "frantic")
 GHOST_SECONDS = 180.0
 
+FREE_SEEDS = 40      # how many seeds the tuning and clock survey walks
+
 #: Measured on the build before the mixer existed, seed 7788, two minutes each.
 #: Kept as numbers rather than as a memory of them, because the whole claim is
 #: that this was arithmetic and not taste.
@@ -189,6 +191,49 @@ def _crowding_at(spacing: float) -> float:
             measured.append(analyse(piece.notes, piece.strokes, piece.motif, piece.scale,
                                     piece.root_pitch, piece.total_beats, lead).crowding)
     return statistics.mean(measured)
+
+
+def freedom_survey() -> dict:
+    """How often the machine leaves the twelve-tone grid and the shared pulse."""
+    from collections import Counter
+
+    from compex.generate import clocks as clockwork
+    from compex.generate import tuning as tuner
+
+    families: Counter = Counter()
+    by_mood: dict[str, Counter] = {}
+    examples: dict[str, object] = {}
+    off_grid: list[float] = []
+
+    for name in THEME_ORDER:
+        mood = THEMES[name]
+        counts: Counter = Counter()
+        for seed in range(FREE_SEEDS):
+            found = tuner.derive(seed, mood)
+            counts[found.family] += 1
+            families[found.family] += 1
+            examples.setdefault(found.family, found)
+            if found.family != "twelve":
+                off_grid.extend(
+                    min(abs(value - nearest * 100.0) for nearest in range(13))
+                    for value in found.cents())
+        by_mood[name] = counts
+
+    pieces = [compose(2026, 120.0, THEMES[name])
+              for name in ("serene", "hypnotic", "menacing", "shattered")]
+    loose = [(piece, clock) for piece in pieces for clock in piece.clocks
+             if not clock.anchored]
+
+    return {
+        "families": families,
+        "by_mood": by_mood,
+        "examples": examples,
+        "off_grid": statistics.mean(off_grid) if off_grid else 0.0,
+        "worst_off": max(off_grid) if off_grid else 0.0,
+        "pieces": pieces,
+        "loose": loose,
+        "seeds": FREE_SEEDS,
+    }
 
 
 def ghost_survey() -> dict:
@@ -1475,6 +1520,114 @@ plays them yet.</div>
 """
 
 
+def panel_free(survey) -> str:
+    from compex.generate.clocks import RATIOS
+    from compex.generate.tuning import DIVISIONS, LIMITS
+
+    families = survey["families"]
+    total = sum(families.values()) or 1
+    rows = "".join(
+        f"<tr><td><b>{name}</b></td>"
+        f"<td>{counts['twelve'] / survey['seeds'] * 100:.0f}%</td>"
+        f"<td>{counts['equal'] / survey['seeds'] * 100:.0f}%</td>"
+        f"<td>{counts['just'] / survey['seeds'] * 100:.0f}%</td></tr>"
+        for name, counts in survey["by_mood"].items())
+
+    shown = "".join(
+        f"<tr><td><code>{family}</code></td><td>{found.name}</td>"
+        f"<td class='sub'>{', '.join(f'{value:.0f}' for value in found.cents())}</td>"
+        f"<td class='sub'>{found.detail}</td></tr>"
+        for family, found in survey["examples"].items())
+
+    clocks = "".join(
+        f"<tr><td><b>{piece.mood.nearest_theme()}</b></td><td><code>{clock.voice}</code></td>"
+        f"<td>{clock.numerator}:{clock.denominator}</td>"
+        f"<td>{clock.meets_every(float(piece.beats_per_bar)):g} beats</td></tr>"
+        for piece, clock in survey["loose"][:10])
+
+    return f"""
+<h2 style="margin-top:26px">Off the grid</h2>
+<p class="sub">Two things a machine can do that a person cannot, added because the question was
+what would make it a more capable <i>machine</i> musician rather than a better imitation of a
+human one.</p>
+
+<h3>It tunes itself</h3>
+<div class="read"><b>Twelve notes to the octave is a fact about keyboards, not about music.</b> It
+is a compromise adopted because a physical instrument cannot retune between chords, inherited by
+everyone who learned on one. There is no keyboard in here — the engine synthesises from
+frequencies, and every pitch it produces is a float. The twelve-tone grid was a table I handed it,
+and in a project whose first rule is that nothing is looked up, it was the largest one left.</div>
+
+<p>So each piece derives its own tuning, from one of three families:</p>
+<ul>
+<li><b>twelve</b> — the familiar grid and the named modes on it. Still where a serene piece
+almost always lands, because legibility is a real property and sometimes the right one.</li>
+<li><b>equal</b> — some other equal division of the octave ({", ".join(str(n) for n in DIVISIONS)}),
+with degrees chosen by stacking that division's best fifth. Even steps, unfamiliar intervals: the
+difference between a system you have not heard before and something broken.</li>
+<li><b>just</b> — degrees built from whole-number frequency ratios up to the
+{LIMITS[-1]}-limit, ranked by <b>Tenney height</b> (log2 of numerator times denominator — the
+plainest measure of how simple a ratio is). Partials line up exactly instead of nearly, so chords
+stop beating. No fixed-pitch instrument can do this and still change key.</li>
+</ul>
+
+<div class="read warn"><b>The risk is reading as out of tune rather than differently tuned</b>, and
+two rules exist to prevent it. Nothing is ever randomised into place: every degree comes from a
+ratio or from an equal division. And no gap is left too wide to step through — a scale with a
+quarter of an octave missing is a chord, and a melody crossing it has to leap every time.</div>
+
+<div class="grid">
+<div class="stat"><div class="n">{families['twelve'] / total * 100:.0f}%</div>
+  <div class="k">of pieces stay in twelve</div></div>
+<div class="stat"><div class="n">{families['equal'] / total * 100:.0f}%</div>
+  <div class="k">another equal division</div></div>
+<div class="stat"><div class="n">{families['just'] / total * 100:.0f}%</div>
+  <div class="k">whole-number ratios</div></div>
+<div class="stat"><div class="n">{survey['off_grid']:.0f}&cent;</div>
+  <div class="k">average distance from the nearest twelve-tone pitch, when it leaves</div></div>
+</div>
+
+<p class="sub">Measured over {survey['seeds']} seeds per theme. Strangeness is a decision, so
+leaving twelve is driven by tension, grit and darkness:</p>
+<table><thead><tr><th>theme</th><th>twelve</th><th>equal</th><th>just</th></tr></thead>
+<tbody>{rows}</tbody></table>
+
+<p class="sub">One tuning it actually derived from each family — degrees in cents:</p>
+<table><thead><tr><th>family</th><th>name</th><th>cents</th><th>from</th></tr></thead>
+<tbody>{shown}</tbody></table>
+
+<h3>More than one clock</h3>
+<div class="read"><b>An ensemble shares a pulse because people cannot reliably hold two at once.</b>
+A machine can hold as many as it likes, and scheduling them costs nothing here because time is
+addressed positionally — <code>f(seed, stream, index)</code> does not care which grid the index is
+counted on.</div>
+
+<p>So voices can run at rational multiples of the base tempo
+({", ".join(f"{n}:{d}" for n, d in dict.fromkeys(RATIOS) if n != d)}). <b>Rational rather than
+arbitrary</b>, for one reason: irrational ratios never meet again. A 3:2 voice realigns with the
+pulse every two bars, and that returning coincidence is what the ear latches onto. Without it you
+have not written polytempo, you have written drift.</p>
+
+<div class="read ok"><b>One anchor stays on the pulse</b> — the bass, the kick, the boom. You can
+only hear three-against-two if something is being the two. That is not a concession to human
+hearing; a ratio needs both of its terms to exist.</div>
+
+<table><thead><tr><th>piece</th><th>voice</th><th>ratio</th><th>meets the pulse every</th></tr>
+</thead><tbody>{clocks}</tbody></table>
+
+<div class="q"><b>Open: how far is too far.</b> A piece in 31-EDO with three voices on different
+clocks is legitimately what was asked for and may still be unlistenable. The mood axes gate both —
+serene stays in twelve and on one clock — but where the line sits is a guess, and only listening
+settles it.</div>
+
+<div class="q"><b>Open: the critic still measures roughness on an interpolated twelve-tone
+table.</b> It is generalised — a neutral third lands between the minor and major one rather than
+being rounded to whichever is nearer — but a real model would work from the partials of the actual
+voices. In a just tuning the whole point is that those partials coincide, and nothing measures
+that yet.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -1568,6 +1721,7 @@ def build() -> str:
     hindsight = hindsight_survey()
     mixing = mix_survey()
     haunting = ghost_survey()
+    freedom = freedom_survey()
     waves = [
         (name, make_track(Knobs(seed=7788, duration_s=30.0), THEMES[name]).samples, 30.0)
         for name in ("serene", "menacing")
@@ -1647,6 +1801,7 @@ that was designed and not built.</div>
 <button class="tab" data-panel="purpose">What is it for?</button>
 <button class="tab" data-panel="mix">The mix</button>
 <button class="tab" data-panel="ghosts">The ghosts</button>
+<button class="tab" data-panel="free">Off the grid</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
@@ -1660,6 +1815,7 @@ that was designed and not built.</div>
 <div class="panel" id="purpose">{panel_purpose(purpose, hindsight)}</div>
 <div class="panel" id="mix">{panel_mix(mixing)}</div>
 <div class="panel" id="ghosts">{panel_ghosts(haunting)}</div>
+<div class="panel" id="free">{panel_free(freedom)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 

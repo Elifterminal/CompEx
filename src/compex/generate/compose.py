@@ -31,7 +31,10 @@ import math
 from dataclasses import dataclass
 
 from compex import rng
-from compex.generate import critic, melody, pattern, promise, recall, theory, write
+from compex.generate import (
+    clocks as clockwork,
+)
+from compex.generate import critic, melody, pattern, promise, recall, theory, tuning, write
 from compex.generate.critic import Analysis, Verdict
 from compex.generate.evolve import Drives, Evolution, initial_drives, respond, trace
 from compex.generate.material import Movement, Note, Stroke
@@ -51,6 +54,8 @@ from compex.generate.palette import (
 from compex.generate.pattern import Grid, Groove, Pattern, PatternChoice
 from compex.generate.promise import Ledger
 from compex.generate.theory import Chord, Motif
+from compex.generate.clocks import Clock
+from compex.generate.tuning import Tuning
 from compex import measure
 from compex.measure import Reveal, Shape
 
@@ -111,6 +116,9 @@ class Composition:
     patterns: tuple[PatternChoice, ...] = ()
     grids: tuple[Grid, ...] = ()
     retunings: tuple[Retuning, ...] = ()
+    tuning: Tuning = Tuning(name="ionian", family="twelve",
+                            steps=(0.0, 2.0, 4.0, 5.0, 7.0, 9.0, 11.0))
+    clocks: tuple[Clock, ...] = ()
     taste: Taste = Taste()
     opening_taste: Taste = Taste()
     groove: Groove = Groove()
@@ -163,7 +171,7 @@ class Composition:
         strayed = self.taste.strayed_from(self.opening_taste)
         moved = sum(1 for grid in self.grids if grid.past_start())
         return "\n".join([
-            f"{self.bpm:.1f} BPM in {self.beats_per_bar}/4 · {self.scale_name.replace('_', ' ')}"
+            f"{self.bpm:.1f} BPM in {self.beats_per_bar}/4 · {self.tuning.describe()}"
             f" on {_pitch_name(self.root_pitch)}",
             f"form: {self.archetype} — " + " → ".join(m.name for m in self.movements),
             f"harmony: {len(self.progression)} chords, one per {self.chord_beats:g} beats",
@@ -179,6 +187,8 @@ class Composition:
             f" · {moved} rhythm grid(s) past their starting weights",
             f"promises: {self.ledger.summary(self.total_beats)}",
             f"ghosts: {len(self.ghosts)} notes it decided against, kept audible",
+            "clocks: " + clockwork.summary({c.voice: c for c in self.clocks},
+                                           float(self.beats_per_bar)),
             f"hindsight: {self.reveal.describe() if self.reveal else 'not measured'}",
             f"evolved: {corrections} corrections over {len(self.evolution)} listen-backs, "
             f"plasticity {self.final_drives.plasticity:.2f}",
@@ -196,8 +206,9 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     beats_per_bar = _meter(seed, mood)
     root_pitch = 36 + int(rng.uniform(seed, "root", 0) * 12)
 
-    scale_name = theory.pick_scale(seed, mood.valence, mood.tension)
-    scale = theory.SCALES[scale_name]
+    # The twelve-tone grid is a table, not a fact — so it picks its own.
+    voicing = tuning.derive(seed, mood)
+    scale_name, scale = voicing.name, voicing.steps
 
     chord_count = max(2, min(8, 2 + int(mood.density * 6.5)))
     progression = theory.progression(seed, scale, chord_count, mood.tension)
@@ -211,6 +222,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
     voices = _voices(seed, mood)
     kit = build_kit(seed, mood)
     grids = _grids(seed, kit, voices, beats_per_bar, mood)
+    ticking = clockwork.assign(seed, voices, kit, mood)
     lead_voices = frozenset(v.voice_id for v in voices if v.role == ROLE_LEAD)
 
     drives = initial_drives(mood, root_pitch)
@@ -280,7 +292,7 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
             current_motif, voices, kit, figures, drives, taste, lineage, heard, approach,
             ledger, cursor / max(total, 1e-6),
             past, tuple(shapes[-VOCABULARY_WINDOW:]),
-            measure.baseline(past, tuple(shapes[:1])),
+            measure.baseline(past, tuple(shapes[:1])), ticking,
         )
         notes.extend(written.notes)
         strokes.extend(written.strokes)
@@ -303,13 +315,15 @@ def compose(seed: int, duration_s: float, mood: Mood) -> Composition:
 
     return Composition(
         seed=seed, mood=mood, bpm=bpm, beats_per_bar=beats_per_bar, root_pitch=root_pitch,
-        scale_name=scale_name, scale=scale, archetype=archetype, progression=progression,
+        scale_name=scale_name, scale=scale, archetype=archetype, tuning=voicing,
+        progression=progression,
         chord_beats=chord_beats, motif=motif, movements=movements,
         voices=tuple(voices) + kit,
         notes=tuple(notes), strokes=tuple(strokes), ghosts=tuple(ghosts),
         evolution=tuple(history), final_drives=drives,
         melodies=tuple(melodies), patterns=tuple(patterns),
         grids=tuple(grids.values()), retunings=tuple(retunings),
+        clocks=tuple(ticking.values()),
         taste=taste, opening_taste=opening_taste, groove=groove,
         ledger=ledger.forget(cursor),
         reveal=_reveal_of(tuple(shapes), movements),

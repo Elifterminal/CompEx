@@ -28,6 +28,7 @@ def emit(composition: Composition, runtime_s: float | None = None) -> str:
         _motif(composition),
         _form(composition),
         *_patterns(composition),
+        *_clocks(composition),
         *_voices(composition),
         *_melody(composition),
         *_ledger(composition),
@@ -60,12 +61,24 @@ def _tempo(composition: Composition) -> str:
 
 
 def _scale(composition: Composition) -> str:
-    degrees = ",".join(str(step) for step in composition.scale)
+    """The tuning, in semitones and in cents.
+
+    Cents because the piece is very often not in twelve any more, and a row of
+    numbers like 0, 1.19, 3.86 means nothing until you can see it is 0, 119,
+    386 — a just major third, off the grid by fourteen cents and on purpose.
+    """
+    tuning = composition.tuning
+    degrees = ",".join(f"{step:g}" for step in tuning.steps)
+    cents = ",".join(f"{value:.0f}" for value in tuning.cents())
     tonic = _NAMES[composition.root_pitch % 12]
-    return (
-        f"\\Sigma=\\left\\{{{degrees}\\right\\}}_{{\\mathrm{{{composition.scale_name}}}}}"
+    line = (
+        f"\\Sigma=\\left\\{{{degrees}\\right\\}}_{{\\mathrm{{{tuning.name}}}}}"
         f"\\ \\mathrm{{on\\ }}{tonic}_{{{composition.root_pitch // 12 - 1}}}"
+        f"\\qquad\\mathrm{{cents}}=\\left\\{{{cents}\\right\\}}"
     )
+    if tuning.family != "twelve":
+        line += f"\\qquad\\mathrm{{{tuning.family}}}:\\ \\mathrm{{{tuning.detail}}}"
+    return line
 
 
 def _harmony(composition: Composition) -> str:
@@ -109,6 +122,18 @@ def _patterns(composition: Composition) -> list[str]:
             f"_{{\\Delta={figure.subdivision:g}}}"
         )
     return lines
+
+
+def _clocks(composition: Composition) -> list[str]:
+    """Any voice not on the pulse, and when it comes back to it."""
+    loose = [clock for clock in composition.clocks if not clock.anchored]
+    if not loose:
+        return []
+    bar = float(composition.beats_per_bar)
+    return ["\\mathrm{CLOCKS}:\\ " + ",\\ ".join(
+        f"\\mathrm{{{clock.voice}}}=\\frac{{{clock.numerator}}}{{{clock.denominator}}}"
+        f"\\ \\mathrm{{meets\\ every\\ }}{clock.meets_every(bar):g}"
+        for clock in loose)]
 
 
 def _voices(composition: Composition) -> list[str]:

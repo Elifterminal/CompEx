@@ -128,6 +128,8 @@ class CompexHandler(BaseHTTPRequestHandler):
             "taste": report.taste(result.composition),
             "ledger": report.ledger(result.composition),
             "ghosts": report.ghosts(result.composition, knobs.ghost_gain),
+            "tuning": report.tuning(result.composition),
+            "clocks": report.clocks(result.composition),
             "mix": report.mix(result.mix),
             "hindsight": report.hindsight(result.composition),
         }

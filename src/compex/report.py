@@ -199,6 +199,41 @@ def mix(decided) -> dict:
     }
 
 
+def tuning(composition: Composition) -> dict:
+    """What the piece is tuned to, and how far that is from the usual grid."""
+    voicing = composition.tuning
+    return {
+        "name": voicing.name,
+        "family": voicing.family,
+        "detail": voicing.detail,
+        "degrees": len(voicing.steps),
+        "steps": [round(step, 3) for step in voicing.steps],
+        "cents": [round(value, 1) for value in voicing.cents()],
+        # How far each degree sits from the nearest twelve-tone pitch, in
+        # cents. Zero all the way down means it is in twelve; anything else is
+        # the measure of how far out it went.
+        "off_grid": [round(min(abs(value - nearest * 100.0)
+                               for nearest in range(13)), 1)
+                     for value in voicing.cents()],
+    }
+
+
+def clocks(composition: Composition) -> dict:
+    """Which voices are on their own tempo, and when they meet the pulse again."""
+    bar = float(composition.beats_per_bar)
+    spb = composition.seconds_per_beat
+    loose = [clock for clock in composition.clocks if not clock.anchored]
+    return {
+        "voices": len(composition.clocks),
+        "loose": [{"voice": clock.voice,
+                   "ratio": f"{clock.numerator}:{clock.denominator}",
+                   "rate": round(clock.ratio, 3),
+                   "meets_every_beats": round(clock.meets_every(bar), 2),
+                   "meets_every_seconds": round(clock.meets_every(bar) * spb, 2)}
+                  for clock in loose],
+    }
+
+
 def ghosts(composition: Composition, gain: float = 0.0) -> dict:
     """The lines the composer decided against, and how loudly they are heard."""
     spb = composition.seconds_per_beat

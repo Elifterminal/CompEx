@@ -348,14 +348,19 @@ def _spread(pitches: Sequence[float]) -> float:
 
 
 def _dissonance(notes: Sequence[Note], scale: tuple[int, ...], root_pitch: int) -> float:
-    """Roughness of each sounding pitch against the tonic, by interval class.
+    """Roughness of each sounding pitch against the tonic.
 
     Crude next to a real roughness model, and enough to tell a plagal drift
-    from a tritone pile-up.
+    from a tritone pile-up. Interpolated rather than rounded to a semitone,
+    because the piece is not necessarily in twelve — a neutral third has to
+    land between the minor and the major one rather than being filed as
+    whichever it is nearer.
     """
     if not notes:
         return 0.3
-    total = sum(ROUGHNESS.get(int(round(n.pitch - root_pitch)) % 12, 0.5) for n in notes)
+    from compex.generate.tuning import roughness_at
+
+    total = sum(roughness_at(note.pitch - root_pitch) for note in notes)
     return total / len(notes)
 
 

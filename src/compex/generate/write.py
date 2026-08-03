@@ -26,6 +26,7 @@ from compex.generate.palette import (
     ROLE_TEXTURE,
     VoiceSpec,
 )
+from compex.generate.clocks import Clock
 from compex.generate.pattern import Bed, Grid, Pattern, PatternChoice
 from compex.generate.promise import Ledger
 from compex.generate.theory import Chord
@@ -129,7 +130,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                    approach: int | None = None, ledger: Ledger = Ledger(),
                    position: float = 0.0, past: tuple[Shape, ...] = (),
                    vocabulary: tuple[Shape, ...] = (),
-                   past_cost: tuple[float, ...] = ()) -> Written:
+                   past_cost: tuple[float, ...] = (),
+                   clocks: dict[str, Clock] | None = None) -> Written:
     """Write one movement under the current drives, taste and patterns."""
     notes: list[Note] = []
     strokes: list[Stroke] = []
@@ -150,7 +152,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                     seed, index, chord_index, voice, chord, scale, root_pitch,
                     cursor, span, movement, motif, drives, taste, lineage, heard,
                     approach, ledger, position, past, vocabulary, past_cost,
-                    spacing.get(voice.voice_id, 0))
+                    spacing.get(voice.voice_id, 0),
+                    (clocks or {}).get(voice.voice_id))
                 notes.extend(written)
                 ghosts.extend(haze)
                 if choice is not None:
@@ -158,7 +161,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                 continue
             notes.extend(_voice_notes(seed, index, chord_index, voice, chord, scale,
                                       root_pitch, cursor, span, movement, patterns, drives,
-                                      spacing.get(voice.voice_id, 0)))
+                                      spacing.get(voice.voice_id, 0),
+                                      (clocks or {}).get(voice.voice_id)))
         cursor += span
         chord_index += 1
 
@@ -167,7 +171,8 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
         figure = patterns.get(drum.voice_id)
         if figure is None:
             continue
-        for beat, velocity in figure.hits(origin, end):
+        for beat, velocity in _on_clock(figure, origin, end,
+                                        (clocks or {}).get(drum.voice_id)):
             # The pattern says where; the movement still says whether. A quiet
             # movement thins its own groove rather than swapping it for another.
             if rng.uniform(seed, f"gate-{drum.voice_id}", int(beat * 4)) > gate + 0.22:
@@ -189,7 +194,7 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
 
 def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span,
           movement, motif, drives, taste, lineage, heard, approach, ledger,
-          position=0.0, past=(), vocabulary=(), past_cost=(), octave=0):
+          position=0.0, past=(), vocabulary=(), past_cost=(), octave=0, clock=None):
     """Choose a phrase for this chord and write it out.
 
     The choosing happens in scale degrees, which is why it can be judged before
@@ -230,14 +235,18 @@ def _lead(seed, index, chord_index, voice, chord, scale, root_pitch, start, span
     notes: list[Note] = []
     offset = 0.0
     played = 0
+    # A voice on its own clock fits more (or less) of its material into the
+    # same stretch of the piece. The span it is given does not move; how fast
+    # it moves through it does.
+    rate = clock.ratio if clock else 1.0
     for position, (step, length) in enumerate(zip(phrase.steps, phrase.rhythm)):
         if offset >= span:
             break
         pitch = _in_range(float(base + theory.degree_semitone(scale, chord.degree + step)))
         played = position
         notes.append(Note(
-            start=start + offset,
-            duration=min(length, span - offset),
+            start=start + offset / rate,
+            duration=min(length / rate, span - offset / rate),
             pitch=pitch,
             velocity=_clamp(velocity + rng.between(seed, f"{stream}-v", position, -0.12, 0.12),
                             0.08, 1.0),
@@ -314,7 +323,8 @@ def _ghosts(choice: Choice, voice: VoiceSpec, chord: Chord, scale, base: int,
 # ── everything that is not the tune ───────────────────────────────────────
 
 def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pitch,
-                 start, span, movement, patterns, drives, octave=0) -> list[Note]:
+                 start, span, movement, patterns, drives, octave=0,
+                 clock=None) -> list[Note]:
     stream = f"{voice.voice_id}-{movement_index}-{chord_index}"
     base = root_pitch + 12 * (voice.octave + octave)
     velocity = _clamp(0.35 + 0.65 * movement.energy, 0.08, 1.0)
@@ -329,7 +339,7 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
 
     if voice.role == ROLE_BASS:
         return _bass(seed, stream, voice, chord, scale, base, start, span,
-                     movement, patterns.get(voice.voice_id), drives, velocity)
+                     movement, patterns.get(voice.voice_id), drives, velocity, clock)
 
     if voice.role == ROLE_TEXTURE:
         if rng.uniform(seed, f"{stream}-t", 0) > 0.35 + movement.energy * 0.4:
@@ -342,7 +352,7 @@ def _voice_notes(seed, movement_index, chord_index, voice, chord, scale, root_pi
 
 
 def _bass(seed, stream, voice, chord, scale, base, start, span, movement,
-          figure: Pattern | None, drives, velocity) -> list[Note]:
+          figure: Pattern | None, drives, velocity, clock=None) -> list[Note]:
     """The bass reads the same kind of grid the drums do.
 
     It used to roll dice per subdivision, which meant it never played a figure
@@ -356,7 +366,7 @@ def _bass(seed, stream, voice, chord, scale, base, start, span, movement,
                      velocity=velocity, voice=voice.voice_id)]
 
     notes: list[Note] = []
-    for beat, level in figure.hits(start, start + span):
+    for beat, level in _on_clock(figure, start, start + span, clock):
         offset = beat - start
         # A low voice that changes note on every hit stops being a foundation.
         # Anything off the strong slots gets the fifth instead, which is what a
@@ -396,6 +406,21 @@ def _pull_toward_centre(notes: list[Note], drives: Drives, seed: int,
         return notes
     shift = -12.0 * (1 if distance > 0 else -1)
     return [replace(note, pitch=note.pitch + shift) for note in notes]
+
+
+def _on_clock(figure: Pattern, start: float, end: float,
+              clock: Clock | None) -> tuple[tuple[float, float], ...]:
+    """A pattern's hits, on this voice's own clock.
+
+    The grid is generated in the voice's time and then mapped back into the
+    piece's, which is what makes three-against-two a *pattern* at a different
+    rate rather than a pattern with its hits nudged around.
+    """
+    if clock is None or clock.anchored:
+        return figure.hits(start, end)
+    rate = clock.ratio
+    return tuple((beat / rate, level)
+                 for beat, level in figure.hits(start * rate, end * rate))
 
 
 def _in_range(pitch: float) -> float:

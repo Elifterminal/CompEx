@@ -31,11 +31,12 @@ from dataclasses import dataclass, replace
 
 from compex import rng
 from compex.generate import promise
-from compex.generate.critic import ROUGHNESS, Verdict
+from compex.generate.critic import Verdict
 from compex.generate.evolve import Drives
 from compex.generate.mood import Mood
 from compex.generate.promise import Ledger
 from compex.generate.theory import Motif, degree_semitone
+from compex.generate.tuning import roughness_at
 from compex import measure
 from compex.measure import Shape
 
@@ -682,7 +683,7 @@ def _colour(phrase: Phrase, setting: Setting, tones: frozenset[int]) -> float:
         if (step % span) in tones:
             continue
         semitone = degree_semitone(setting.scale, setting.chord_degree + step)
-        rough += ROUGHNESS.get(semitone % 12, 0.5) * length
+        rough += roughness_at(semitone) * length
     measured = rough / total
     return max(0.0, 1.0 - abs(measured - setting.drives.dissonance_ceiling * 0.55))
 

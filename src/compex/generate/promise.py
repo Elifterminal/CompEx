@@ -41,6 +41,7 @@ FORGET_BEATS = 112.0   # after this it starts fading
 FADE_BEATS = 72.0      # how fast it fades once forgetting starts
 LIVE_FLOOR = 0.04      # below this maturity a promise is no longer on the books
 RIPE = 0.45            # settle below this and you settled it too early
+LEADING_WINDOW = 1.35  # semitones: close enough under a resting note to lean on it
 
 DOMAINS = ("pitch", "metre", "harmony")
 
@@ -202,10 +203,13 @@ def from_phrase(steps: tuple[int, ...], chord_degree: int, scale: tuple[int, ...
         ))
 
     landing = chord_degree + steps[-1]
-    semitone = degree_semitone(scale, landing) % 12
-    if semitone == 11:      # a major seventh under the tonic wants up
+    # Measured in cents from the tonic rather than by index, because the piece
+    # may not be in twelve — a leading tone is anything that sits close enough
+    # underneath a resting point to lean on it, whatever the grid is called.
+    within = degree_semitone(scale, landing) % 12.0
+    if 12.0 - within <= LEADING_WINDOW:
         out.append(_leading(landing, +1, at_beat))
-    elif semitone == 1:     # a flat second over it wants down
+    elif within <= LEADING_WINDOW and within > 1e-9:
         out.append(_leading(landing, -1, at_beat))
     return tuple(out)
 

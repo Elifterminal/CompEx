@@ -75,6 +75,8 @@ class Session:
             "taste": report.taste(self.composition),
             "ledger": report.ledger(self.composition),
             "ghosts": report.ghosts(self.composition, self.ghost_gain),
+            "tuning": report.tuning(self.composition),
+            "clocks": report.clocks(self.composition),
             "mix": report.mix(self.mix),
             "hindsight": report.hindsight(self.composition),
         }

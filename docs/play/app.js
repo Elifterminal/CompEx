@@ -306,6 +306,23 @@ function drawChoices(info) {
     </div>`;
   }).join("");
 
+  const tuning = info.tuning;
+  if (tuning) {
+    const loose = (info.clocks && info.clocks.loose) || [];
+    const degrees = tuning.cents.map((cents, i) => {
+      const off = tuning.off_grid[i];
+      return `<div class="degree${off > 8 ? " off" : ""}"><b>${cents.toFixed(0)}&cent;</b>
+        <span class="dbar"><i style="width:${Math.min(100, off / 50 * 100)}%"></i></span>
+        <span class="hint">${off > 0.5 ? off.toFixed(0) + "&cent; off" : "on grid"}</span></div>`;
+    }).join("");
+    $("tuning").innerHTML = `<h3 class="mini">tuned to</h3>
+      <div class="hint">${tuning.name} · ${tuning.degrees} degrees${tuning.detail ? " · " + tuning.detail : ""}</div>
+      ${degrees}
+      <div class="hint">${loose.length
+        ? loose.length + " voice(s) on their own clock: " + loose.map((c) => c.voice + " " + c.ratio).join(", ")
+        : "one clock, everything on it"}</div>`;
+  }
+
   const ghosts = info.ghosts;
   if (ghosts && ghosts.notes) {
     $("ghosts").innerHTML = `<h3 class="mini">what it decided against</h3>

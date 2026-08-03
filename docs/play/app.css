@@ -164,6 +164,15 @@ pre {
         border: 1px solid var(--line); }
 .obar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 
+/* tuning */
+.tuning { display: grid; gap: 3px; margin-bottom: 10px; }
+.degree { display: grid; grid-template-columns: 56px 1fr 62px; gap: 8px; align-items: center;
+          font-size: 12px; }
+.dbar { height: 7px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.dbar i { display: block; height: 100%; border-radius: 999px; background: var(--dim); }
+.degree.off .dbar i { background: var(--warn); }
+.degree.off b { color: var(--warn); }
+
 /* ghosts */
 .ghosts { display: grid; gap: 4px; margin-bottom: 10px; }
 .ghostrow { display: grid; grid-template-columns: 96px 1fr 52px; gap: 8px; align-items: center;
