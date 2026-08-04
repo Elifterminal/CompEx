@@ -329,6 +329,33 @@ def _ghosts(composition: Composition) -> list[str]:
             for ghost in choice.ghosts)
         lines.append(
             f"\\Gamma_{{{choice.movement}}}@{choice.at_beat:g}=\\left\\{{{nearly}\\right\\}}")
+
+    kit = [choice for choice in composition.patterns if choice.ghosts]
+    if kit:
+        pairs = [(ghost, choice) for choice in kit for ghost in choice.ghosts]
+        whole = sum(ghost.pattern.hit_count for ghost, _ in pairs)
+        kept = sum(len(ghost.instead_of(choice.pattern)) for ghost, choice in pairs)
+        lines.append(
+            "\\mathrm{GHOSTS}_{\\mathrm{kit}}:\\ "
+            f"{len(pairs)}\\mathrm{{\\ grooves\\ turned\\ down}},\\ "
+            f"{len(composition.ghost_strokes)}\\mathrm{{\\ hits\\ sounded}},\\ "
+            f"{100 * (1 - kept / whole) if whole else 0:.0f}\\%"
+            "\\mathrm{\\ of\\ them\\ already\\ playing}")
+        # Only the ones that left something behind. Half of every rejected
+        # groove is hits the winner was playing anyway, and printing "0 hits
+        # differ" four times says nothing about what the piece nearly did.
+        spoke = sorted(((ghost, choice) for ghost, choice in pairs
+                        if ghost.instead_of(choice.pattern)),
+                       key=lambda pair: pair[0].margin)[:4]
+        for ghost, choice in spoke:
+            lines.append(
+                f"\\Gamma^{{\\mathrm{{{choice.voice}}}}}_{{{choice.movement}}}="
+                f"\\mathrm{{|{ghost.pattern.describe()}|}}"
+                f"\\ \\mathrm{{instead\\ of}}\\ "
+                f"\\mathrm{{|{choice.pattern.describe()}|}},\\ "
+                f"{len(ghost.instead_of(choice.pattern))}"
+                "\\mathrm{\\ hits\\ differ},\\ "
+                f"\\gamma={ghost.closeness():.2f}")
     return lines
 
 

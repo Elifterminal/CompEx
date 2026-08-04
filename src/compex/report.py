@@ -313,6 +313,40 @@ def ghosts(composition: Composition, gain: float = 0.0) -> dict:
         "torn": round(sum(ghost.closeness() for choice in per_choice
                           for ghost in choice.ghosts)
                       / max(1, sum(len(choice.ghosts) for choice in per_choice)), 3),
+        "rhythm": rhythm_ghosts(composition),
+    }
+
+
+def rhythm_ghosts(composition: Composition) -> dict:
+    """The kit's runners-up — and how much of each was already being played.
+
+    ``doubled`` is the load-bearing number. A rejected groove mostly agrees
+    with the one that beat it, and the part it agrees about is already
+    sounding, so only the disagreement is worth hearing. If this ever fell to
+    near zero the rule would be pointless complexity.
+    """
+    haunted = [choice for choice in composition.patterns if choice.ghosts]
+    pairs = [(ghost, choice) for choice in haunted for ghost in choice.ghosts]
+    whole = sum(ghost.pattern.hit_count for ghost, _ in pairs)
+    kept = sum(len(ghost.instead_of(choice.pattern)) for ghost, choice in pairs)
+    closest = sorted(pairs, key=lambda pair: pair[0].margin)[:6]
+
+    return {
+        "strokes": len(composition.ghost_strokes),
+        "played": len(composition.strokes),
+        "auditions": len(haunted),
+        "turned_down": len(pairs),
+        "doubled": round(1.0 - kept / whole, 3) if whole else 0.0,
+        "torn": round(sum(ghost.closeness() for ghost, _ in pairs) / len(pairs), 3)
+        if pairs else 0.0,
+        "closest": [{"voice": choice.voice,
+                     "movement": choice.movement,
+                     "margin": round(ghost.margin, 4),
+                     "heard_at": round(ghost.closeness(), 3),
+                     "instead_of": len(ghost.instead_of(choice.pattern)),
+                     "played": ghost.pattern.describe(),
+                     "beaten_by": choice.pattern.describe()}
+                    for ghost, choice in closest],
     }
 
 

@@ -36,6 +36,13 @@ from compex.measure import Shape
 #: What marks a note as a ghost — a line the composer imagined, judged, and
 #: decided against. The renderer strips this to find the voice it belongs to.
 GHOST_MARK = "~ghost"
+
+#: How far back a ghost stroke sits from a real one, on top of the closeness it
+#: earns. Percussion needs the extra hand: a drum is a transient, so a hit at
+#: the same level as the winner's reads as a hit rather than as a memory of
+#: one, and the kit already had to be pulled back twice in this project's
+#: history for swamping everything melodic.
+GHOST_STROKE_TRIM = 0.42
 GHOST_VELOCITY = 0.8      # how loud a ghost is against the line that beat it
 GHOST_OWED_BOOST = 1.5    # a ghost that would have settled a debt is worth hearing
 
@@ -75,6 +82,7 @@ class Written:
     approach: int | None = None   # the scale degree the last phrase ended on
     ledger: Ledger = Ledger()     # what the piece owes after writing this
     ghosts: tuple[Note, ...] = ()  # the lines it decided against, kept to be heard
+    ghost_strokes: tuple[Stroke, ...] = ()   # and the grooves it decided against
 
 
 def choose_patterns(seed: int, index: int, movement: Movement, grids: dict[str, Grid],
@@ -132,12 +140,14 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                    vocabulary: tuple[Shape, ...] = (),
                    past_cost: tuple[float, ...] = (),
                    clocks: dict[str, Clock] | None = None,
-                   push: tuple[tuple[str, float], ...] = ()) -> Written:
+                   push: tuple[tuple[str, float], ...] = (),
+                   ghost_patterns: dict[str, tuple] | None = None) -> Written:
     """Write one movement under the current drives, taste and patterns."""
     notes: list[Note] = []
     strokes: list[Stroke] = []
     choices: list[Choice] = []
     ghosts: list[Note] = []
+    ghost_strokes: list[Stroke] = []
 
     end = origin + movement.beats
     chord_index = 0
@@ -188,9 +198,64 @@ def write_movement(seed: int, index: int, movement: Movement, origin: float,
                 voice=drum.voice_id,
             ))
 
+        ghost_strokes.extend(_ghost_strokes(
+            figure, (ghost_patterns or {}).get(drum.voice_id, ()), drum.voice_id,
+            origin, end, movement, (clocks or {}).get(drum.voice_id), ledger))
+
     return Written(notes=tuple(notes), strokes=tuple(strokes), choices=tuple(choices),
                    lineage=lineage, heard=heard, approach=approach, ledger=ledger,
-                   ghosts=tuple(ghosts))
+                   ghosts=tuple(ghosts), ghost_strokes=tuple(ghost_strokes))
+
+
+def _ghost_strokes(winner: Pattern, ghosts, voice_id: str, start: float, end: float,
+                   movement: Movement, clock=None, ledger: Ledger = Ledger()) -> list[Stroke]:
+    """The hits that did not land, played where the decision actually differed.
+
+    This is the rhythmic half of the mechanism the project is named for, and it
+    took longer than the melodic half for a reason worth recording: a rejected
+    *phrase* is a different line, but a rejected *groove* is mostly the same
+    groove. Two patterns drawn off one grid agree about the downbeat and argue
+    about the rest, so playing a loser whole would re-strike what is already
+    sounding and add nothing but thickness. Only the disagreement is a ghost.
+
+    They go out through the same lowpass as the melodic ghosts, which for a
+    drum is a stronger effect than it is for a line: a hi-hat with everything
+    above 1.8 kHz taken off it stops being a hi-hat and becomes the memory of
+    one. That is the intended sound, and it is also what keeps a kit playing
+    two grooves at once from turning into free jazz — the ghosts blur rather
+    than articulate.
+    """
+    out: list[Stroke] = []
+    for ghost in ghosts:
+        instead = set(ghost.instead_of(winner))
+        if not instead:
+            continue
+        # A rejected groove that would have struck far more often than the one
+        # that won is not a near-miss, it is a different piece — and played at
+        # a near-miss level it stops being a shadow and becomes a second
+        # drummer, which is the free-jazz failure this whole mechanism has to
+        # avoid. So the shadow is held down in proportion to how much of a
+        # takeover it would have been. Nothing is dropped and nothing is
+        # falsified: every hit the composer turned down is still there, at a
+        # level that says how much of the bar it wanted.
+        crowd = len(instead) / max(1, winner.hit_count)
+        heard_at = ghost.closeness() / max(1.0, crowd)
+        # Same rule the melodic ghosts get: a groove that would have paid off
+        # something the piece owes is not merely a road not taken.
+        if any(promise.pattern_settles(owed, ghost.pattern.slots, ghost.pattern.subdivision)
+               for owed in ledger.live(start, domain="rhythm")):
+            heard_at = min(1.0, heard_at * GHOST_OWED_BOOST)
+        shadow = replace(ghost.pattern, slots=tuple(
+            velocity if index in instead else 0.0
+            for index, velocity in enumerate(ghost.pattern.slots)))
+        for beat, velocity in _on_clock(shadow, start, end, clock):
+            out.append(Stroke(
+                start=beat,
+                velocity=_clamp(velocity * heard_at * GHOST_STROKE_TRIM
+                                * (0.55 + 0.55 * movement.energy), 0.0, 1.0),
+                voice=f"{voice_id}{GHOST_MARK}",
+            ))
+    return out
 
 
 # ── the lead: audition, then play the winner ──────────────────────────────

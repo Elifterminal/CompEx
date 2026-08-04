@@ -362,9 +362,15 @@ function drawChoices(info) {
 
   const ghosts = info.ghosts;
   if (ghosts && ghosts.notes) {
+    const kit = ghosts.rhythm && ghosts.rhythm.turned_down
+      ? `<div class="hint">and ${ghosts.rhythm.turned_down} grooves the kit turned down —
+          ${ghosts.rhythm.strokes} hits you can just hear under the ones it played.
+          ${Math.round(ghosts.rhythm.doubled * 100)}% of each was already sounding, so only
+          what they disagreed about is played.</div>`
+      : "";
     $("ghosts").innerHTML = `<h3 class="mini">what it decided against</h3>
       <div class="hint">${ghosts.notes} notes from ${ghosts.turned_down} lines turned down ·
-        average closeness ${ghosts.torn}</div>` + ghosts.loudest.slice(0, 5).map((g) => `
+        average closeness ${ghosts.torn}</div>${kit}` + ghosts.loudest.slice(0, 5).map((g) => `
       <div class="ghostrow"><b>${g.origin}</b>
         <span class="gbar"><i style="width:${Math.min(100, g.heard_at * 100)}%"></i></span>
         <span class="hint">${g.margin}</span></div>`).join("");

@@ -266,6 +266,17 @@ function drawGhosts(ghosts) {
     host.innerHTML = `<p class="note">no ghosts — either it was never torn, or they are switched off</p>`;
     return;
   }
+  const kit = ghosts.rhythm && ghosts.rhythm.turned_down
+    ? `<div class="note" style="margin-top:8px"><b>the kit's runners-up</b> —
+        ${ghosts.rhythm.turned_down} grooves turned down, ${ghosts.rhythm.strokes} hits sounded
+        against ${ghosts.rhythm.played} played. ${Math.round(ghosts.rhythm.doubled * 100)}% of each
+        rejected groove was already being played, so only the disagreement is heard.</div>`
+      + ghosts.rhythm.closest.slice(0, 4).map((g) => `
+        <div class="ghostrow"><code>${g.voice}</code>
+          <code>|${g.played}|</code> instead of <code>|${g.beaten_by}|</code>
+          <span class="note">${g.instead_of} hits differ · heard at ${g.heard_at}</span></div>`).join("")
+    : "";
+
   const rows = ghosts.loudest.map((g) => `
     <div class="ghostrow">
       <code>${g.origin}</code>
@@ -274,7 +285,7 @@ function drawGhosts(ghosts) {
     </div>`).join("");
   host.innerHTML = `<div class="note">${ghosts.notes} notes it decided against, from
     ${ghosts.turned_down} lines turned down across ${ghosts.auditions} auditions ·
-    average closeness ${ghosts.torn} · played at ${ghosts.gain}</div>${rows}`;
+    average closeness ${ghosts.torn} · played at ${ghosts.gain}</div>${rows}${kit}`;
 }
 
 function drawMix(mix) {

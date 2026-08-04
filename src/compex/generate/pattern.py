@@ -30,6 +30,7 @@ still being playable, not about what was expected.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 
 from compex import rng
@@ -202,6 +203,62 @@ class Groove:
         return " · ".join(f"{name} {value:.2f}" for name, value in self.weights())
 
 
+#: How many losing grooves per audition are kept to be heard. One, against the
+#: melodic auditions' three, and the rule that sets it is worth stating because
+#: it is the whole defence against this mechanism turning the kit into free
+#: jazz: **the shadow must never have more hits in it than what was played.**
+#: A shadow busier than the thing casting it stops reading as doubt and starts
+#: reading as a second drummer, and two kits playing independent parts is
+#: exactly the failure mode being avoided.
+#:
+#: Measured at two ghosts per audition, the shadow outnumbered the real kit on
+#: four of six moods — worst on *serene*, 336 ghost strokes against 216 real,
+#: which is the worst possible place for it. At one it is under on 42 of 45
+#: pieces, which is better and still not a guarantee, so **counting is only
+#: half the defence**. The other half is in :func:`write._ghost_strokes`: a
+#: rejected groove is held down in proportion to how much busier than the
+#: winner it would have been, which caps what the shadow can contribute
+#: whatever the count does. Measured across the same 45: the shadow never
+#: exceeds 23% of the kit's level, and is never louder on any of them.
+GHOSTS_KEPT = 1
+
+
+@dataclass(frozen=True)
+class Ghost:
+    """A groove that was drawn, judged, and not played.
+
+    The melodic version of this is a line nobody hears; the rhythmic version is
+    a hit that did not land. Kept for the same reason: how close it came is a
+    real fact about the piece and nothing else can carry it.
+    """
+
+    pattern: Pattern
+    score: float
+    margin: float      # how far behind the winner it finished
+
+    def closeness(self, sharpness: float = 6.0) -> float:
+        """How loudly this deserves to be heard, 0..1."""
+        return float(math.exp(-max(0.0, self.margin) * sharpness))
+
+    def instead_of(self, winner: Pattern) -> tuple[int, ...]:
+        """The slots this would have struck and the winner did not.
+
+        **The difference, not the whole pattern.** Two grooves drawn off the
+        same grid agree about most of the bar — they both put something on the
+        downbeat — so playing a loser entire would mostly re-strike hits that
+        are already sounding. That is not a ghost, it is a flam: it thickens
+        the mix and says nothing, because a doubled hit carries no information
+        about the decision. What the audition actually turned down is the part
+        where the two disagree, and that is the only part worth hearing.
+        """
+        if winner.subdivision != self.pattern.subdivision:
+            return tuple(index for index, velocity in enumerate(self.pattern.slots)
+                         if velocity > 0)
+        return tuple(index for index, velocity in enumerate(self.pattern.slots)
+                     if velocity > 0
+                     and not (index < len(winner.slots) and winner.slots[index] > 0))
+
+
 @dataclass(frozen=True)
 class PatternChoice:
     """One pattern audition, kept so the piece can say why it grooves like that."""
@@ -214,6 +271,7 @@ class PatternChoice:
     rejected: tuple[tuple[str, float], ...]
     considered: int
     strayed: float
+    ghosts: tuple[Ghost, ...] = ()
 
     @property
     def margin(self) -> float:
@@ -348,6 +406,9 @@ def invent(seed: int, movement: int, index: int, grid: Grid, groove: Groove,
               for pattern, criteria in ((p, assess(p, grid, bed)) for p in candidates)]
     winner, criteria, score = max(scored, key=lambda row: row[2])
 
+    losers = sorted((row for row in scored if row[0] is not winner),
+                    key=lambda row: -row[2])[:GHOSTS_KEPT]
+
     return PatternChoice(
         movement=movement, voice=grid.voice, pattern=winner, score=score,
         scores=tuple(sorted(criteria.items())),
@@ -355,6 +416,8 @@ def invent(seed: int, movement: int, index: int, grid: Grid, groove: Groove,
                        for pattern, _, value in scored if pattern is not winner),
         considered=len(scored),
         strayed=grid.strayed(),
+        ghosts=tuple(Ghost(pattern=pattern, score=value, margin=score - value)
+                     for pattern, _, value in losers),
     )
 
 

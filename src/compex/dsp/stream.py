@@ -142,7 +142,7 @@ def render_span(composition: Composition, span: Span, carry: np.ndarray | None =
     if trims is None:
         trims = arrange.survey(composition).trims()
     _voices_in_span(melodic, composition, span, seconds_per_beat, total, trims)
-    if ghost_gain > 0 and composition.ghosts:
+    if ghost_gain > 0 and (composition.ghosts or composition.ghost_strokes):
         melodic += _ghosts_in_span(composition, span, seconds_per_beat, total) * ghost_gain
     _strokes_in_span(percussion, composition, span, seconds_per_beat, total, trims)
     melodic *= _duck(total, composition, span, seconds_per_beat)
@@ -241,6 +241,23 @@ def _ghosts_in_span(composition, span, seconds_per_beat, total) -> np.ndarray:
                 cache[key] = sample
             _add_at(bus, sample * note.velocity,
                     _offset(note.start, span.start_beat, seconds_per_beat))
+
+    kit = {v.voice_id: v for v in composition.voices if v.role == ROLE_PERC}
+    trim = kit_trim(len(kit))
+    drum_cache: dict[tuple[str, int], np.ndarray] = {}
+    for order, stroke in enumerate(composition.ghost_strokes):
+        if not (span.start_beat <= stroke.start < span.end_beat):
+            continue
+        spec = kit.get(stroke.voice.replace(GHOST_MARK, ""))
+        if spec is None:
+            continue
+        key = (stroke.voice, order % VARIANTS)
+        sample = drum_cache.get(key)
+        if sample is None:
+            sample = drums.render_drum(spec, SAMPLE_RATE, composition.seed, order % VARIANTS)
+            drum_cache[key] = sample
+        _add_at(bus, sample * stroke.velocity * spec.gain * trim,
+                _offset(stroke.start, span.start_beat, seconds_per_beat))
 
     return filters.lowpass(bus, SAMPLE_RATE, GHOST_CUTOFF, order=2)
 

@@ -71,8 +71,15 @@ def pluck(spec, freq, count, sample_rate, seed, index):
 
     brightness = spec.get("brightness", 0.7)
     if brightness < 0.99:
-        width = max(1, int((1.0 - brightness) * 9))
-        excitation = np.convolve(excitation, np.ones(width) / width, mode="same")
+        # Clamped to the delay line, because ``mode="same"`` returns the longer
+        # of its two arguments rather than the length of the first. A dark note
+        # high enough to give a four-sample string came back six samples long
+        # and took the whole render down. Unreachable at 48 kHz — it needs the
+        # 11 kHz rate the listening probe runs at, which is why it sat here
+        # from the day that probe shipped until a sweep over every theme and
+        # seed happened to hit it.
+        width = max(1, min(length, int((1.0 - brightness) * 9)))
+        excitation = np.convolve(excitation, np.ones(width) / width, mode="same")[:length]
 
     notch = max(1, int(length * spec.get("pick", 0.2)))
     excitation[:notch] *= np.linspace(0.2, 1.0, notch)

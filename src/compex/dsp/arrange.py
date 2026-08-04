@@ -113,7 +113,7 @@ def render_composition(composition: Composition, master_gain: float = 0.89,
     _report(progress, 0.80, f"placing {len(composition.strokes)} strokes")
     _render_strokes(percussion, composition, seconds_per_beat, mix.trims())
 
-    if ghost_gain > 0 and composition.ghosts:
+    if ghost_gain > 0 and (composition.ghosts or composition.ghost_strokes):
         _report(progress, 0.86, f"{len(composition.ghosts)} notes it decided against")
         melodic += _render_ghosts(total, composition, seconds_per_beat) * ghost_gain
 
@@ -233,7 +233,32 @@ def _render_ghosts(total: int, composition: Composition,
                 cache[key] = sample
             _add_at(bus, sample * note.velocity, _sample_at(note.start, seconds_per_beat))
 
+    _ghost_strokes(bus, composition, seconds_per_beat)
     return filters.lowpass(bus, SAMPLE_RATE, GHOST_CUTOFF, order=2)
+
+
+def _ghost_strokes(bus: np.ndarray, composition: Composition,
+                   seconds_per_beat: float) -> None:
+    """The hits that did not land, onto the same blurred bus as the lines.
+
+    They share the bus rather than getting their own on purpose: the lowpass is
+    what turns a rejected drum into the memory of one, and a kit playing its
+    runners-up at full bandwidth is a second kit, not a doubt.
+    """
+    kit = {voice.voice_id: voice for voice in composition.voices if voice.role == ROLE_PERC}
+    trim = kit_trim(len(kit))
+    cache: dict[tuple[str, int], np.ndarray] = {}
+    for order, stroke in enumerate(composition.ghost_strokes):
+        spec = kit.get(stroke.voice.replace(GHOST_MARK, ""))
+        if spec is None:
+            continue
+        key = (stroke.voice, order % VARIANTS)
+        sample = cache.get(key)
+        if sample is None:
+            sample = drums.render_drum(spec, SAMPLE_RATE, composition.seed, order % VARIANTS)
+            cache[key] = sample
+        _add_at(bus, sample * stroke.velocity * spec.gain * trim,
+                _sample_at(stroke.start, seconds_per_beat))
 
 
 def _sidechain(total: int, composition: Composition, seconds_per_beat: float) -> np.ndarray:

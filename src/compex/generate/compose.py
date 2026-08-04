@@ -116,6 +116,7 @@ class Composition:
     notes: tuple[Note, ...]
     strokes: tuple[Stroke, ...]
     ghosts: tuple[Note, ...] = ()
+    ghost_strokes: tuple[Stroke, ...] = ()
     evolution: tuple[Evolution, ...] = ()
     final_drives: Drives = Drives()
     melodies: tuple[Choice, ...] = ()
@@ -268,6 +269,7 @@ def compose(seed: int, duration_s: float, mood: Mood,
     notes: list[Note] = []
     strokes: list[Stroke] = []
     ghosts: list[Note] = []
+    ghost_strokes: list[Stroke] = []
     history: list[Evolution] = []
     melodies: list[Choice] = []
     patterns: list[PatternChoice] = []
@@ -356,10 +358,12 @@ def compose(seed: int, duration_s: float, mood: Mood,
             past, tuple(shapes[-VOCABULARY_WINDOW:]),
             measure.baseline(past, tuple(shapes[:1])), ticking,
             push=plan.bias,
+            ghost_patterns={record.voice: record.ghosts for record in chosen},
         )
         notes.extend(written.notes)
         strokes.extend(written.strokes)
         ghosts.extend(written.ghosts)
+        ghost_strokes.extend(written.ghost_strokes)
         melodies.extend(written.choices)
         shapes.extend(_shape_of(choice) for choice in written.choices)
         lineage, heard_pairs, approach = written.lineage, written.heard, written.approach
@@ -383,6 +387,7 @@ def compose(seed: int, duration_s: float, mood: Mood,
         chord_beats=chord_beats, motif=motif, movements=movements,
         voices=tuple(voices) + kit,
         notes=tuple(notes), strokes=tuple(strokes), ghosts=tuple(ghosts),
+        ghost_strokes=tuple(ghost_strokes),
         evolution=tuple(history), final_drives=drives,
         melodies=tuple(melodies), patterns=tuple(patterns),
         grids=tuple(grids.values()), retunings=tuple(retunings),

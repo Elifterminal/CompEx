@@ -1507,6 +1507,16 @@ def panel_ghosts(survey) -> str:
     from compex.generate.melody import GHOSTS_KEPT
     from compex.generate.write import GHOST_OWED_BOOST
 
+    from compex import report
+
+    rhythm = report.rhythm_ghosts(survey["example"])
+    kit_rows = "".join(
+        f"<tr><td><code>{row['voice']}</code></td>"
+        f"<td><code>|{row['played']}|</code></td>"
+        f"<td><code>|{row['beaten_by']}|</code></td>"
+        f"<td>{row['instead_of']}</td><td>{row['heard_at']}</td></tr>"
+        for row in rhythm["closest"] if row["instead_of"])
+
     example = survey["example"]
     nearest = "".join(
         f"<tr><td><code>{ghost.phrase.origin}</code></td>"
@@ -1583,9 +1593,30 @@ is hearing the machine hesitate. The risk is that a haze of near-misses under a 
 heard as ambience, in which case the mechanism is honest and the perception is wrong — which would
 be worth knowing, and only a listener can say.</div>
 
-<div class="q"><b>Open: only melodic auditions have ghosts.</b> The rhythm auditions turn down
-candidates too, and a rejected pattern is at least as interesting as a rejected phrase. Nothing
-plays them yet.</div>
+<h3>The kit has them too, under a different rule</h3>
+<div class="read ok"><b>A rejected phrase is a different line. A rejected groove is mostly the
+<i>same</i> groove.</b> Two patterns drawn off one grid agree about the downbeat and argue about
+the rest, so playing a loser whole would re-strike hits that are already sounding — a flam, not a
+ghost, thickening the mix while saying nothing about the decision. Measured across a piece,
+<b>{rhythm['doubled'] * 100:.0f}% of every rejected groove was already being played.</b> Only the
+disagreement is heard.</div>
+
+<table><thead><tr><th>voice</th><th>it nearly played</th><th>it played</th><th>hits differing</th>
+<th>heard at</th></tr></thead><tbody>{kit_rows}</tbody></table>
+<p class="sub">{rhythm['turned_down']} grooves turned down across {rhythm['auditions']} kit
+auditions; {rhythm['strokes']} ghost hits against {rhythm['played']} real ones.</p>
+
+<div class="read"><b>And the rule that keeps a kit playing two grooves at once from turning into
+free jazz.</b> A shadow busier than the thing casting it stops reading as doubt and starts reading
+as a second drummer. Two defences: only the closest loser is kept, and a groove that would have
+struck far more often than the winner is held down in proportion to how much of a takeover it would
+have been. Nothing is dropped — every hit the composer turned down is still there, at a level that
+says how much of the bar it wanted. Measured over 45 pieces, every theme and three seeds each:
+<b>the shadow never exceeds 23% of the kit's level, and is never louder on any of them.</b></div>
+
+<div class="read">The lowpass does more work here than it does for the lines. A hi-hat with
+everything above {GHOST_CUTOFF:.0f} Hz taken off it stops being a hi-hat and becomes the memory of
+one — which is the intended sound and the second thing holding the texture together.</div>
 """
 
 

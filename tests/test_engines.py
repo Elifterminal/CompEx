@@ -9,6 +9,7 @@ import unittest
 import numpy as np
 
 from compex.dsp import drums, effects, engines
+from compex.dsp.engines import core
 from compex.dsp import fx
 from compex.dsp.engines import ENGINE_NAMES, NOTE_CEILING, NOTE_LOUDNESS
 from compex.generate.mood import THEMES
@@ -260,3 +261,35 @@ class HoldTests(unittest.TestCase):
         holding = [name for name in ENGINES_FOR_ROLE[ROLE_PAD]
                    if HOLD[name] >= NEEDS_HOLD[ROLE_PAD]]
         self.assertGreaterEqual(len(holding), 10, f"only {len(holding)} pad engines hold")
+
+
+class PluckDelayLineTests(unittest.TestCase):
+    """A string shorter than its own smoothing kernel.
+
+    ``np.convolve(..., mode="same")`` returns the longer of its two arguments,
+    not the length of the first, so a dark note high enough to give a
+    four-sample delay line came back six samples long and took the render down
+    with it. Unreachable at 48 kHz: it needs the 11 kHz rate the listening
+    probe runs at, which is how it survived from the day that probe shipped.
+    Reference cases with known answers, because a piece of music has no known
+    answer to check against.
+    """
+
+    def test_a_string_shorter_than_its_kernel_still_renders(self):
+        for freq in (2000.0, 2756.0, 4000.0, 5512.0):
+            out = core.pluck({"brightness": 0.0, "decay": 1.0}, freq, 4096, 11025, 7, 0)
+            self.assertEqual(len(out), 4096, freq)
+            self.assertTrue(np.all(np.isfinite(out)), freq)
+
+    def test_it_still_works_where_it_always_did(self):
+        for freq, rate in ((55.0, 48000), (440.0, 48000), (110.0, 11025)):
+            out = core.pluck({"brightness": 0.3, "decay": 1.0}, freq, 4096, rate, 7, 0)
+            self.assertEqual(len(out), 4096)
+            self.assertGreater(float(np.max(np.abs(out))), 0.0)
+
+    def test_the_probe_rate_survives_every_pitch_the_engine_can_write(self):
+        """The actual failure path: the listening probe, at the top of the range."""
+        for midi in range(24, 121, 8):
+            freq = 440.0 * 2 ** ((midi - 69) / 12)
+            out = core.pluck({"brightness": 0.1, "decay": 1.2}, freq, 2048, 11025, 3, 1)
+            self.assertTrue(np.all(np.isfinite(out)), midi)
