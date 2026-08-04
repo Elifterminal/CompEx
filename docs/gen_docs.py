@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import html
 import json
+import platform
 import statistics
 import sys
 from collections import Counter
@@ -827,14 +828,38 @@ desync anything downstream, which is what a future realtime version will need.</
 
 <h3>The formula it writes</h3>
 <p>Every track is saved with a <code>.tex</code> file beside it. The <code>SEED</code>,
-<code>RUNTIME</code> and <code>MOOD</code> lines are the load-bearing part — feed those three
-back and the identical file comes out. Everything under them is exposition: what those three
-turned into. Here is the real one for the piece used throughout this page.</p>
+<code>RUNTIME</code> and <code>MOOD</code> lines are the load-bearing part; everything under them
+is exposition, meaning what those three turned into. Here is the real one for the piece used
+throughout this page.</p>
 <pre>{html.escape(example.formula)}</pre>
 <div class="read ok"><b>Verified, not asserted.</b> Reading that file back and re-composing
 produces a byte-identical track — the audio fingerprint <code>{piece.seed}</code> &rarr;
 <code>{example.fingerprint}</code> matches. There is a test that fails if it ever stops
 matching.</div>
+
+<div class="q"><b>And that claim is narrower than this page used to make it.</b> It holds for a
+piece composed with <i>no history</i> and rendered at the <i>default knobs</i> — which is what the
+test covers and what the example above is. Three cases reproduce something else, and they do it
+<b>silently</b>: replay does not warn, it hands back a different piece.
+
+<table><thead><tr><th>case</th><th>the track</th><th>what replay gives</th></tr></thead><tbody>
+<tr><td>blank history, default knobs</td><td><code>{REPRO["base"]}</code></td>
+    <td><code>{REPRO["base"]}</code> — matches</td></tr>
+<tr><td>composed after 3 remembered pieces</td><td><code>{REPRO["memory"]}</code></td>
+    <td><code>{REPRO["base"]}</code></td></tr>
+<tr><td>rendered at ghost 0.9</td><td><code>{REPRO["ghost"]}</code></td>
+    <td><code>{REPRO["base"]}</code></td></tr>
+<tr><td>rendered at master 0.5</td><td><code>{REPRO["master"]}</code></td>
+    <td><code>{REPRO["base"]}</code></td></tr>
+</tbody></table>
+
+<p class="sub">Measured on melancholy, seed 249984309, 30 seconds. The memory case is the sharpest:
+the formula <i>prints</i> the history digest, so it carries the evidence that it cannot reproduce
+its own track — and replay never reads it. It could not use it if it did, because the digest is a
+12-character checksum of the tables rather than the tables. Neither <code>ghost_gain</code> nor
+<code>master_gain</code> appears in the formula at all, and there is no engine-build identifier in
+it either, while the package has been version <code>0.1.0</code> throughout every change described
+on this page. Full write-up in <b>Corrections</b>.</p></div>
 """
 
 
@@ -1346,6 +1371,18 @@ itself. See <b>The ghosts</b>.</div>
 """
 
 
+#: Measured on melancholy, seed 249984309 — the piece whose mix prompted this
+#: work. Hard-coded rather than recomputed because reproducing it means
+#: rendering a six-minute track twice, once with the fix reverted, and the page
+#: build is slow enough already. The run is in the commit that added it.
+WOOD = {
+    "rim_before": 0.989, "rim_after": 0.449,
+    "rim_share_before": 2.1, "rim_share_after": 0.5,
+    "pad_share_before": 13.8, "pad_share_after": 19.8,
+    "ratio_before": 0.49, "ratio_after": 0.28,
+}
+
+
 def panel_mix(survey) -> str:
     from compex.dsp.balance import BAND_NAMES, CEILING, FLOOR
     from compex.dsp.engines import NOTE_LOUDNESS
@@ -1426,6 +1463,38 @@ Multiplied by how much that voice plays, that says what it contributes to each b
 <p class="sub">Bands: {", ".join(BAND_NAMES)}. The floor scales with how much a voice plays —
 a texture that speaks four times in five minutes is not buried, it is occasional, and shouting it
 forward would overrule the composer's own sparseness.</p>
+
+<h3>The mixer was making the loudest thing in the piece</h3>
+<div class="read"><b>Presence was measured as band energy alone, and for anything percussive that
+is the wrong question asked confidently.</b> A wood block carries almost no energy — it is over in
+a tenth of a second — so the mixer read it as drowned and lifted it by the maximum it was allowed,
+while a listener heard the sharpest, most forward thing in the track. Measured on one real piece
+(melancholy, seed 249984309): <b>the rim was being boosted 2.60&times;, the conga 2.60&times;, the
+kick 2.09&times;</b>, all of them already the tallest things in the mix. The mixer was not failing
+to fix that complaint. It was causing it.</div>
+
+<div class="read ok"><b>The missing term is sharpness, and it is measurable.</b> A transient is
+heard out of proportion to the energy it carries — the same fact that put a crest tilt in the level
+normaliser — so a voice's apparent presence is now its energy scaled by its peak against a
+<i>fixed-window</i> RMS. Fixed on purpose: the window must not shrink to fit the sound, because the
+ear's does not. That is a correction to a measurement, not a decision about what a wood block
+should sound like, which matters here — the engine is not allowed to be handed a human aesthetic.</div>
+
+<div class="read"><b>And a second finding, the same shape.</b> Everything is ducked out of the
+kick's way on every hit, and <i>then</i> the mixer looked at the low band, saw a pad and a bass
+living there, decided the kick was losing it, and lifted it again. The same room counted twice. A
+voice the sidechain already clears a hole for can now be trimmed down but never up.</div>
+
+<p class="sub">On that piece, before and after: the rim's peak {WOOD["rim_before"]:.3f} &rarr;
+{WOOD["rim_after"]:.3f} and its share of the energy {WOOD["rim_share_before"]:.1f}% &rarr;
+{WOOD["rim_share_after"]:.1f}%; the pad it was covering {WOOD["pad_share_before"]:.1f}% &rarr;
+{WOOD["pad_share_after"]:.1f}%; percussive against melodic
+{WOOD["ratio_before"]:.2f} &rarr; {WOOD["ratio_after"]:.2f}.</p>
+
+<div class="q"><b>Open: whether the kick is now too far back.</b> Removing that double-count took
+the kick from 12.8% of the energy to 3.1%. It still has a hole cut for it on every hit, so the
+argument says it should still read clearly — but that is an argument, and the only thing that
+settles it is listening.</div>
 
 <div class="grid">
 <div class="stat"><div class="n">{survey['percussive'] * 100:.0f}%</div>
@@ -1851,10 +1920,16 @@ makes leaving easier next time. The past decays, so the last handful of pieces m
 hundred are a rumour.</p>
 
 <div class="read ok"><b>Determinism survives because the memory is an argument, not hidden
-state.</b> Same seed, same mood, same history gives the same audio — and the history's digest is
-printed in the formula next to the seed, so two people with the same seed and different histories
-can see why they have different music. A hidden accumulator would have broken the one property
-everything else here rests on, silently.</div>
+state.</b> Same seed, same mood, same history gives the same audio. A hidden accumulator would have
+broken the one property everything else here rests on, silently.</div>
+
+<div class="q"><b>But the digest in the formula is a tell, not a key.</b> This page used to stop at
+the paragraph above, which read as though printing the history's digest beside the seed closed the
+loop. It does not. The digest lets two people with the same seed and different histories see
+<i>why</i> their music differs — and that is all it does. It is a 12-character blake2b checksum
+over the remembered tables, so nothing can invert it, and <code>compex replay</code> never reads it
+in any case. A formula written after a non-blank history therefore contains the evidence that it
+cannot reproduce its own track, and replays as though it could. See <b>Corrections</b>.</div>
 
 <p class="sub">The same seed and the same mood, six times in a row, with the engine remembering:</p>
 <table><thead><tr><th>#</th><th>history</th><th>instruments it chose</th></tr></thead>
@@ -1920,6 +1995,127 @@ parameters that matter more.</div>
 """
 
 
+#: What this page was built with. Printed on the page because the determinism
+#: guarantee is only meaningful relative to an environment, and the project has
+#: never named one.
+ENVIRONMENT = (f"Python {platform.python_version()}, NumPy {np.__version__}, "
+               f"{platform.machine()}")
+
+
+#: Fingerprints from the reproducibility audit, measured on melancholy seed
+#: 249984309 at 30 seconds. Hard-coded rather than recomputed: reproducing them
+#: means rendering four tracks and replaying three, and the page build is slow
+#: enough already. The script that produced them is in the commit.
+REPRO = {
+    "base": "f518130cc8829ff9",
+    "memory": "0fb3446651b46ab3",
+    "ghost": "b7831f80c162fe9c",
+    "master": "33c536ad3a384980",
+}
+
+
+def panel_corrections() -> str:
+    """Every claim this page has had to take back, and why.
+
+    The page is generated from the running package, so it cannot drift from the
+    code. It can still drift from the *truth* — a claim that was accurate when
+    written and stopped being accurate, or one that was never quite right and
+    nobody had measured it yet. Those are not the same failure and quietly
+    editing them away hides the more interesting one.
+    """
+    return """
+<h2>Corrections</h2>
+<p class="sub">What this page used to say, what it says now, and how the difference was found.
+Nothing here has been silently edited — a project whose whole method is "measure it before you
+claim it" has no business hiding the times the measurement arrived late.</p>
+
+<div class="q"><b>2026-08-04 — "feed the three lines back and the identical file comes out."</b>
+<br><b>Was:</b> the <code>SEED</code>, <code>RUNTIME</code> and <code>MOOD</code> lines were called
+the load-bearing part of the formula, and the page said feeding them back reproduces the track byte
+for byte, full stop.
+<br><b>Is:</b> true only for a piece composed with <i>no history</i> and rendered at the
+<i>default knobs</i>. Three cases reproduce something else, and the failure is silent — replay does
+not warn, it just hands back a different piece:
+<ul>
+<li>a composition made with a non-blank memory — the digest is printed in the formula but replay
+never reads it, and it could not use it if it did: it is a 12-character blake2b checksum, not the
+tables it was made from;</li>
+<li>a render at a non-default ghost level — <code>ghost_gain</code> is not in the formula;</li>
+<li>a render at a non-default master level — <code>master_gain</code> is not in the formula.</li>
+</ul>
+<b>How it was found:</b> not by a test. Lee read the emitter against the replay path and worked out
+that they disagreed about what the load-bearing information was. Measured afterwards to confirm —
+the fingerprints are in the section below.
+<br><b>Also wrong in the same place:</b> there is no engine-build identifier anywhere in the
+formula, and the package has been version <code>0.1.0</code> through every change on this page. An
+old formula replayed by a newer engine can legitimately produce a different piece and nothing in
+either artifact would say so.</div>
+
+<div class="q"><b>2026-08-04 — "the memory is an argument, so determinism survives."</b>
+<br><b>Was:</b> stated as though printing the history's digest beside the seed closed the loop.
+<br><b>Is:</b> the narrow claim is still true — <i>same seed, same mood, same history, same
+audio</i> — and the digest does let two people with different histories see <i>why</i> their music
+differs. But the digest is a <b>tell, not a key</b>. It is enough to know a formula cannot
+reproduce its track and not enough to make it. The formula therefore contains the evidence of its
+own insufficiency and does not act on it.</div>
+
+<div class="q"><b>2026-08-04 — the mixer was causing the complaint it existed to fix.</b>
+<br><b>Was:</b> presence described purely as band energy — measure who owns each band, lift whoever
+is losing.
+<br><b>Is:</b> energy alone is the wrong question for anything percussive. A wood block carries
+almost no energy, so the mixer read it as drowned and lifted it by the maximum allowed. Measured on
+one real piece: the rim was being boosted 2.60&times;, the conga 2.60&times;, the kick 2.09&times;,
+all of them already the sharpest things in the mix. <b>How it was found:</b> a listening complaint
+that named the wood block specifically, then measurement of that exact track. Sharpness is now part
+of the measure. See <b>The mix</b>.</div>
+
+<div class="read"><b>2026-08-03 — "the ghosts are the last piece that was designed and not
+built."</b> True when written and wrong within a day: intent-as-a-trajectory had also been designed
+and unbuilt at that point, and shipping it made the sentence false in two directions at once.
+Corrected in place, and the claim is now dated rather than absolute.</div>
+
+<div class="read"><b>2026-08-03 — two designs for the plan, published rather than deleted.</b>
+Leaning on the taste weights scored &minus;0.041 &plusmn; 0.037 against no plan at all; the same
+levers with feedback scored +0.001 &plusmn; 0.029. Both were built, measured, and thrown away. They
+are on the page under <b>The plan</b> because a mechanism that measures at zero is a finding, and
+because the gain for the version that <i>did</i> work was first tuned on the same four pieces the
+improvement was then reported from — a mistake worth showing, since the clean peak it produced
+evaporated at twenty.</div>
+
+<div class="read"><b>2026-08-02 — "every engine leaves at the same peak level."</b> Replaced by
+loudness matching after a listening complaint that pads were being buried. Peak says how tall a
+sound is, not how loud; a swelling pad and a plucked string reach the same height and nothing like
+the same volume. The README carried the old sentence for two days after the code had stopped
+doing it.</div>
+
+<div class="read"><b>2026-08-02 — "not built: the ghosts", "the composer cannot hear the
+mix."</b> Both shipped and both left standing on the page for a while afterwards. Corrected rather
+than deleted, which is why they are listed here.</div>
+
+<h3>What is actually guaranteed, stated narrowly</h3>
+<div class="read ok"><b>Within one process, one machine, one build:</b> the same seed, runtime,
+mood, history and knobs give bit-identical samples. That is what the test suite checks and it holds.
+The positional RNG (<code>value = f(seed, stream, index)</code>) is what makes the
+<i>compositional</i> decisions reproducible, and that part is genuinely solid — it has no
+sequential state to desync.</div>
+
+<div class="q"><b>What is not guaranteed, and is not currently tested:</b> bit-identical audio
+across NumPy versions, Python versions, CPU architectures or BLAS builds. The package depends on
+<code>numpy&gt;=1.24</code> with no upper bound, and floating-point DSP is not obliged to be
+bitwise stable across any of those. The honest scope of the guarantee is <i>a pinned environment</i>,
+and the honest fix is either to pin it or to test across the environments claimed. Neither has been
+done. This page was generated under """ + html.escape(ENVIRONMENT) + """.</div>
+
+<div class="read"><b>Two artifacts this project conflates, and should not.</b> A <b>recipe</b>
+reproduces the composition under a named engine build: seed, mood, runtime, the full memory
+snapshot, an engine fingerprint, and every consequential setting. A <b>frozen score</b> carries
+every compositional decision, so the piece can be reconstructed without re-running the decision
+process at all — immune to the engine changing underneath it. The <code>.tex</code> is currently
+neither: it is a recipe missing three of its ingredients, with a complete human-readable exposition
+of the decisions sitting right beside it that nothing can read back. Not built.</div>
+"""
+
+
 def panel_open(data) -> str:
     return f"""
 <h2 style="margin-top:26px">What is not settled</h2>
@@ -1939,6 +2135,11 @@ state at a shape and measurably hits it — +0.136 &plusmn; 0.046 better than no
 pieces. Every one of those numbers is about the machine's internals. Whether a piece under
 <code>unravel</code> is <i>heard</i> as coming apart, rather than merely as one that got busier,
 is the question that measurement cannot reach. See <b>The plan</b>.</div>
+
+<div class="read ok"><b>Stems, since they were asked for.</b> <code>--stems</code> writes every
+voice as its own file at exactly the level it has in the mix — trims applied, sidechain applied.
+They are the buses that actually went in, not the voices re-recorded alone, which is the property
+that makes them usable: they sum back to the master to within the mastering stage.</div>
 
 <div class="q"><b>The plan has a deadband.</b> Both of its strong levers are whole numbers — one
 more candidate in the audition, one more octave between voices — so on some pieces it asks for a
@@ -2082,7 +2283,9 @@ else — tempo, meter, key, mode, chord progression, the motif, the shape of the
 instruments exist and how each is built — is invented by the machine.</div>
 <div class="read ok"><b>It writes down what it did.</b> Each track is saved with the equation
 notation describing every decision, and feeding that notation back produces the identical track,
-byte for byte.</div>
+byte for byte — for a piece composed with no history, at the default knobs, on this build. Outside
+those conditions it reproduces something else without saying so, which is written up in
+<b>Corrections</b> rather than quietly fixed.</div>
 <div class="read"><b>And it changes its mind while writing.</b> After each movement it
 listens back to what it actually wrote, scores it against named aesthetic principles, and shifts
 the parameters it writes with — including how hard it reacts to itself.</div>
@@ -2122,6 +2325,7 @@ unbuilt.</div>
 <button class="tab" data-panel="plan">The plan</button>
 <button class="tab" data-panel="free">Off the grid</button>
 <button class="tab" data-panel="example">One piece, step by step</button>
+<button class="tab" data-panel="corrections">Corrections</button>
 <button class="tab" data-panel="open">What is not settled</button>
 </nav>
 
@@ -2137,6 +2341,7 @@ unbuilt.</div>
 <div class="panel" id="plan">{panel_plan(planning)}</div>
 <div class="panel" id="free">{panel_free(freedom, remembering)}</div>
 <div class="panel" id="example">{panel_example(example, data)}</div>
+<div class="panel" id="corrections">{panel_corrections()}</div>
 <div class="panel" id="open">{panel_open(data)}</div>
 
 <footer>
