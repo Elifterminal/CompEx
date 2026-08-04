@@ -161,3 +161,37 @@ class CompositionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryMoodTests(unittest.TestCase):
+    """Compose in every theme, not a representative handful.
+
+    This exists because of a crash the suite could not have found. A dark note
+    high enough to give a four-sample delay line broke the pluck engine, but
+    only at the 11 kHz rate the listening probe runs at — so it needed a
+    particular theme, a particular seed and a particular pitch all at once. It
+    sat there from the day that probe shipped and was found by sweeping all
+    fifteen moods by hand.
+
+    The input space here is small and fully enumerable. Sampling it was the
+    mistake.
+    """
+
+    def test_every_theme_composes(self):
+        for name, mood in sorted(THEMES.items()):
+            for seed in (11, 2026, 5150):
+                with self.subTest(theme=name, seed=seed):
+                    piece = compose(seed, 30.0, mood)
+                    self.assertTrue(piece.notes or piece.strokes)
+
+    def test_the_shadow_never_outweighs_the_kit_in_any_mood(self):
+        """The anti-jazz guarantee, checked across the whole space rather than
+        the moods that happened to get looked at."""
+        for name, mood in sorted(THEMES.items()):
+            piece = compose(5150, 60.0, mood)
+            if not piece.ghost_strokes:
+                continue
+            shadow = sum(stroke.velocity for stroke in piece.ghost_strokes)
+            kit = sum(stroke.velocity for stroke in piece.strokes)
+            with self.subTest(theme=name):
+                self.assertLess(shadow, kit, name)
