@@ -1,19 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f2b134"/>
-      <stop offset="1" stop-color="#f2784b"/>
-    </linearGradient>
-  </defs>
-  <rect width="128" height="128" rx="26" fill="#0d0f14"/>
+  <!-- Solid strokes, no gradient. A gradient on a stroke is unsupported by some
+       SVG rasterisers (ImageMagick renders this file with the waveform missing
+       entirely), and at 48px it buys nothing an icon can show. -->
+  <rect width="128" height="128" rx="26" fill="#0d0f13"/>
   <rect x="4" y="4" width="120" height="120" rx="23" fill="none" stroke="#262d3a" stroke-width="2"/>
-  <!-- a waveform whose amplitude is modulated: the growl, drawn -->
-  <path fill="none" stroke="url(#g)" stroke-width="5" stroke-linecap="round"
-        d="M14 64
-           q5 -30 10 0 q5 30 10 0
-           q5 -42 10 0 q5 42 10 0
-           q5 -18 10 0 q5 18 10 0
-           q5 -46 10 0 q5 46 10 0
-           q5 -24 10 0 q5 24 10 0"/>
-  <circle cx="64" cy="112" r="4" fill="#4fd1c5"/>
+
+  <!-- The lines it turned down. Different candidates, not offsets of the winner,
+       because that is what they are. Each is dimmer the further behind it came. -->
+  <g fill="none" stroke-linecap="round">
+    <path stroke="#6b4522" stroke-width="2.5"
+          d="M18 64 q6 -34 12 0 q6 34 12 0 q6 -14 12 0 q6 14 12 0 q6 -40 12 0 q6 40 12 0 q6 -20 10 0"/>
+    <path stroke="#8d5a28" stroke-width="2.5"
+          d="M18 64 q6 -16 12 0 q6 16 12 0 q6 -38 12 0 q6 38 12 0 q6 -22 12 0 q6 22 12 0 q6 -34 10 0"/>
+    <path stroke="#af702e" stroke-width="2.5"
+          d="M18 64 q6 -28 12 0 q6 28 12 0 q6 -20 12 0 q6 20 12 0 q6 -12 12 0 q6 12 12 0 q6 -42 10 0"/>
+  </g>
+
+  <!-- The one it played. Cased in the background colour first, so it reads as
+       being in front of the others rather than tangled with them. -->
+  <path fill="none" stroke="#0d0f13" stroke-width="11" stroke-linecap="round"
+        d="M18 64 q6 -22 12 0 q6 22 12 0 q6 -44 12 0 q6 44 12 0 q6 -16 12 0 q6 16 12 0 q6 -30 10 0"/>
+  <path fill="none" stroke="#f8b13a" stroke-width="5.5" stroke-linecap="round"
+        d="M18 64 q6 -22 12 0 q6 22 12 0 q6 -44 12 0 q6 44 12 0 q6 -16 12 0 q6 16 12 0 q6 -30 10 0"/>
 </svg>
