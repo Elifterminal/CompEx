@@ -42,8 +42,14 @@
 
     <div class="row">
       <label>save as</label>
-      <div id="formats" class="radios"></div>
+      <div>
+        <div id="formats" class="radios"></div>
+        <span class="hint">Save writes the track, its formula and report, and every voice as its
+          own stem — into ~/Music/CompEx</span>
+      </div>
     </div>
+
+
 
     <details id="advanced">
       <summary>Mood axes — nudge it off the named themes</summary>
@@ -170,7 +176,8 @@
 <!-- Pinned to the bottom of the viewport: these controls are never scrolled out of reach. -->
 <footer class="dock">
   <button id="make" class="primary">Make it</button>
-  <a id="download" class="button disabled" download>Download</a>
+  <button id="save" class="button" disabled>Save</button>
+  <div id="shelf" class="shelf" hidden></div>
   <button id="send" disabled>Email it</button>
   <span id="status" class="status">ready</span>
 </footer>

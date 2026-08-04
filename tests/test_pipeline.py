@@ -7,6 +7,9 @@ from pathlib import Path
 
 import numpy as np
 
+from datetime import date
+
+from compex import library, report
 from compex.audio import encode
 from compex.config import SAMPLE_RATE, KnobError, Knobs
 from compex.generate import THEMES, compose
@@ -202,3 +205,117 @@ class StemTests(unittest.TestCase):
         piece = compose(249984309, 30.0, THEMES["melancholy"])
         self.assertIn("ghosts", render_stems(piece, 0.89, 0.45))
         self.assertNotIn("ghosts", render_stems(piece, 0.89, 0.0))
+
+
+class LibraryTests(unittest.TestCase):
+    """Three parallel trees, the same folder name in each.
+
+    The point of the layout is that finding a track tells you where its stems
+    and its formula are, so the tests are mostly about the name being the key
+    and being the same in all three.
+    """
+
+    def test_the_name_carries_date_mood_seed_and_fingerprint(self):
+        name = library.track_name("melancholy", 249984309, "bb6f655e1199bda6",
+                                  when=date(2026, 8, 4))
+        self.assertEqual(name, "2026-08-04_melancholy_seed249984309_bb6f655e")
+
+    def test_a_mood_with_no_safe_name_still_produces_a_writable_path(self):
+        name = library.track_name("some/odd name", 7, "abcdef0123456789",
+                                  when=date(2026, 8, 4))
+        self.assertNotIn("/", name)
+        self.assertNotIn(" ", name)
+
+    def test_it_files_the_track_its_formula_and_its_stems_under_one_name(self):
+        import tempfile
+        from unittest.mock import patch
+
+        result = make_track(Knobs(seed=771, duration_s=20.0, ghost_gain=0.45),
+                            THEMES["wistful"])
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            with patch("compex.library.TRACKS_DIR", root / "Tracks"), \
+                 patch("compex.library.STEMS_DIR", root / "Stems"), \
+                 patch("compex.library.TRACK_META_DIR", root / "TrackMeta"):
+                written = library.save(result, "wav", stems=True,
+                                       report_json={"movements": []})
+            name = written["name"]
+            for tree in ("Tracks", "Stems", "TrackMeta"):
+                self.assertTrue((root / tree / name).is_dir(), tree)
+            self.assertTrue((root / "Tracks" / name / f"{name}.wav").exists())
+            self.assertTrue((root / "TrackMeta" / name / "formula.tex").exists())
+            self.assertTrue((root / "TrackMeta" / name / "report.json").exists())
+            self.assertTrue(written["stems"])
+
+    def test_stems_are_optional_because_they_are_the_expensive_part(self):
+        import tempfile
+        from unittest.mock import patch
+
+        result = make_track(Knobs(seed=771, duration_s=20.0), THEMES["wistful"])
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            with patch("compex.library.TRACKS_DIR", root / "Tracks"), \
+                 patch("compex.library.STEMS_DIR", root / "Stems"), \
+                 patch("compex.library.TRACK_META_DIR", root / "TrackMeta"):
+                written = library.save(result, "wav", stems=False)
+            self.assertEqual(written["stems"], [])
+            self.assertFalse((root / "Stems" / written["name"]).exists())
+
+    def test_the_report_written_beside_a_track_is_the_whole_report(self):
+        result = make_track(Knobs(seed=771, duration_s=20.0), THEMES["wistful"])
+        sections = report.everything(result, 0.35)
+        for expected in ("movements", "plan", "ledger", "ghosts", "mix", "tuning"):
+            self.assertIn(expected, sections)
+
+
+class SaveEndpointTests(unittest.TestCase):
+    """One button files all three artifacts; Make no longer files anything.
+
+    The split matters: composing and filing used to be the same action, so
+    every experiment left a folder behind. Now Make is a preview and Save is a
+    decision.
+    """
+
+    def setUp(self):
+        from compex.ui import server
+
+        self.server = server
+        server._LAST.clear()
+
+    def _handler(self):
+        from compex.ui.server import CompexHandler
+
+        return CompexHandler.__new__(CompexHandler)
+
+    def test_saving_before_making_refuses_rather_than_guessing(self):
+        with self.assertRaises(ValueError) as caught:
+            self.server.CompexHandler._save(self._handler(), {"format": "wav"})
+        self.assertIn("make a track first", str(caught.exception))
+
+    def test_an_unknown_format_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.server.CompexHandler._save(self._handler(), {"format": "flac"})
+
+    def test_save_files_the_track_its_meta_and_every_stem(self):
+        import tempfile
+        from unittest.mock import patch
+
+        result = make_track(Knobs(seed=42, duration_s=15.0, ghost_gain=0.4),
+                            THEMES["serene"])
+        self.server._LAST["result"] = result
+        self.server._LAST["knobs"] = Knobs(seed=42, duration_s=15.0, ghost_gain=0.4)
+
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            with patch("compex.library.TRACKS_DIR", root / "Tracks"), \
+                 patch("compex.library.STEMS_DIR", root / "Stems"), \
+                 patch("compex.library.TRACK_META_DIR", root / "TrackMeta"):
+                out = self.server.CompexHandler._save(self._handler(), {"format": "wav"})
+
+            self.assertTrue(out["ok"])
+            name = out["name"]
+            self.assertTrue((root / "Tracks" / name / f"{name}.wav").exists())
+            self.assertTrue((root / "TrackMeta" / name / "formula.tex").exists())
+            self.assertTrue((root / "TrackMeta" / name / "report.json").exists())
+            self.assertGreater(len(out["stems"]), 1)
+            self.assertTrue(any("ghosts" in one for one in out["stems"]))

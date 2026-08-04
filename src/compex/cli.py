@@ -11,6 +11,7 @@ from pathlib import Path
 
 from compex import __version__
 from compex.audio import encode
+from compex import library, report
 from compex.config import OUTPUT_DIR, KnobError, Knobs
 from compex.delivery import DEFAULT_RECIPIENT, DeliveryError, send_render
 from compex.generate.mood import AXES, Mood, MoodError, THEMES, theme_names
@@ -38,6 +39,9 @@ def _build_parser() -> argparse.ArgumentParser:
     make.add_argument("--stems", nargs="?", const="", metavar="DIR",
                       help="also write every voice as its own file, at the level it has "
                            "in the mix (default: a stems/ folder beside the track)")
+    make.add_argument("--library", action="store_true",
+                      help="file it under ~/Music/CompEx as Tracks/, Stems/ and TrackMeta/ "
+                           "instead of leaving it flat in out/")
     make.add_argument("-q", "--quiet", action="store_true")
 
     replay = subs.add_parser("replay", help="re-render a track from its formula file")
@@ -88,7 +92,12 @@ def _make(args: argparse.Namespace) -> int:
     formula_path = result.save_formula(destination)
 
     stems: list[Path] = []
-    if args.stems is not None:
+    shelved = None
+    if args.library:
+        shelved = library.save(result, args.format, stems=args.stems is not None,
+                               report_json=report.everything(result, knobs.ghost_gain))
+        stems = shelved["stems"]
+    elif args.stems is not None:
         where = Path(args.stems) if args.stems else Path(destination).with_suffix("") / "stems"
         stems = result.save_stems(where, args.format)
 
@@ -96,8 +105,16 @@ def _make(args: argparse.Namespace) -> int:
         print(result.composition.summary())
         print(f"\nwrote {path}")
         print(f"      {formula_path}")
-        for stem_path in stems:
-            print(f"      {stem_path}")
+        if shelved is not None:
+            print(f"\n  filed as {shelved['name']}")
+            print(f"      {library.relative(shelved['audio'])}")
+            print(f"      {library.relative(shelved['formula'])}")
+            if stems:
+                print(f"      {len(stems)} stems in "
+                      f"{library.relative(stems[0].parent)}/")
+        else:
+            for stem_path in stems:
+                print(f"      {stem_path}")
 
     if args.email:
         try:

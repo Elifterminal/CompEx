@@ -1,7 +1,8 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const state = { themes: [], axes: [], mood: {}, theme: null, track: null, format: "wav" };
+const state = { themes: [], axes: [], mood: {}, theme: null, track: null, format: "wav",
+                api: [] };
 
 /* ---------- setup ---------- */
 
@@ -13,6 +14,11 @@ async function boot() {
     buildThemes();
     buildAxes();
     buildFormats(data.formats || ["wav"]);
+    state.api = data.api || [];
+    if (state.api.length && !state.api.includes("save")) {
+      setStatus("this window is talking to an older CompEx process — close the app and "
+                + "open it again to pick up the current build", "bad");
+    }
     if (state.themes.length) selectTheme(state.themes.find((t) => t.name === "melancholy")
                                         || state.themes[0]);
   } catch (err) {
@@ -448,16 +454,46 @@ function setStatus(text, kind) {
   el.className = "status" + (kind ? " " + kind : "");
 }
 
-function setDelivery(enabled, data) {
-  const link = $("download");
+function setDelivery(enabled) {
   $("send").disabled = !enabled;
-  link.classList.toggle("disabled", !enabled);
-  if (enabled && data) {
-    link.href = data.url;
-    link.setAttribute("download", data.file);
-  } else {
-    link.removeAttribute("href");
+  $("save").disabled = !enabled;
+}
+
+async function saveTrack() {
+  const button = $("save");
+  if (state.api.length && !state.api.includes("save")) {
+    setStatus("this window is talking to an older CompEx process — close the app and open it "
+              + "again", "bad");
+    return;
   }
+  button.disabled = true;
+  setStatus("saving the track, its formula and report, and every stem…");
+  try {
+    const response = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format: state.format }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    drawShelf(data);
+    setStatus(`saved ${data.name} — ${data.stems.length} stems`, "ok");
+  } catch (err) {
+    setStatus(`could not save: ${err.message}`, "bad");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function drawShelf(shelved) {
+  const host = $("shelf");
+  if (!shelved) { host.hidden = true; return; }
+  host.innerHTML = `<div><b>filed as</b> <code>${shelved.name}</code></div>
+    <div><b>track</b> <code>${shelved.track}</code></div>
+    <div><b>formula + report</b> <code>${shelved.formula.replace(/formula\.tex$/, "")}</code></div>
+    <div><b>stems</b> ${shelved.stems.length} files &middot;
+      <code>${shelved.stems.length ? shelved.stems[0].replace(/[^/]*$/, "") : ""}</code></div>`;
+  host.hidden = false;
 }
 
 async function makeTrack() {
@@ -491,9 +527,10 @@ async function makeTrack() {
 
     drawEvolution(data.evolution);
     drawChoices(data);
-    setDelivery(true, data);
+    setDelivery(true);
     drawWave(data.peaks, data.movements, data.duration);
     drawMarks(data.movements, data.duration);
+    drawShelf(null);
     setStatus(`${data.theme} · ${data.duration}s · ${(data.bytes / 1e6).toFixed(1)} MB · ${data.fingerprint}`, "ok");
   } catch (err) {
     setDelivery(false);
@@ -533,6 +570,7 @@ async function emailTrack() {
 
 boot();
 $("make").addEventListener("click", makeTrack);
+$("save").addEventListener("click", saveTrack);
 $("send").addEventListener("click", emailTrack);
 $("reseed").addEventListener("click", () => {
   $("seed").value = Math.floor(Math.random() * 2147483647);

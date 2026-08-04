@@ -21,7 +21,8 @@ import numpy as np
 
 from compex import __version__, report
 from compex.audio import encode
-from compex.config import MEMORY_PATH, OUTPUT_DIR, KnobError, Knobs
+from compex import library
+from compex.config import MEMORY_PATH, MUSIC_DIR, OUTPUT_DIR, KnobError, Knobs
 from compex.delivery import DEFAULT_RECIPIENT, DeliveryError, send_render
 from compex.generate.mood import AXES, THEMES, Mood, MoodError, theme_names
 from compex.pipeline import make_track
@@ -46,6 +47,15 @@ _CONTENT_TYPES = {
 }
 
 
+#: Every POST route this build serves, reported to the page so it can tell the
+#: difference between "that failed" and "you are talking to an older process".
+POST_ROUTES = frozenset({"make", "save", "email"})
+
+#: The most recent render, so Save can file it without composing it again.
+_LAST: dict = {}
+_LAST_LOCK = threading.Lock()
+
+
 class CompexHandler(BaseHTTPRequestHandler):
     server_version = f"compex/{__version__}"
 
@@ -63,6 +73,14 @@ class CompexHandler(BaseHTTPRequestHandler):
                     "themes": [{"name": name, **THEMES[name].as_dict()} for name in theme_names()],
                     "axes": list(AXES),
                     "formats": list(encode.FORMATS) if encode.available() else ["wav"],
+                    # What this process can actually do. The page is served
+                    # fresh from disk on every request but the Python is not
+                    # reloaded, so an app left open across an edit ends up with
+                    # a new front end talking to an old server — which showed
+                    # up as a Save button that answered "not found". The UI
+                    # compares this against what it needs and says so plainly.
+                    "api": sorted(POST_ROUTES),
+                    "version": __version__,
                 })
             elif route.startswith("/api/file/"):
                 self._send_file(unquote(route[len("/api/file/"):]))
@@ -77,6 +95,8 @@ class CompexHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if route == "/api/make":
                 self._send_json(self._make(payload))
+            elif route == "/api/save":
+                self._send_json(self._save(payload))
             elif route == "/api/email":
                 self._send_json(self._email(payload))
             else:
@@ -111,6 +131,13 @@ class CompexHandler(BaseHTTPRequestHandler):
         path = result.save(OUTPUT_DIR / stem, audio_format)
         formula_path = result.save_formula(OUTPUT_DIR / stem)
 
+        # Held so Save can file it without composing the whole thing again.
+        # One slot, because this is a local single-user app and the only thing
+        # anyone ever wants to save is the piece currently on screen.
+        with _LAST_LOCK:
+            _LAST["result"] = result
+            _LAST["knobs"] = knobs
+
         return {
             "ok": True,
             "file": path.name,
@@ -124,21 +151,36 @@ class CompexHandler(BaseHTTPRequestHandler):
             "summary": result.composition.summary(),
             "theme": mood.nearest_theme(),
             "peaks": _waveform(result.samples),
-            "movements": report.movements(result.composition),
-            "evolution": report.evolution(result.composition),
-            "melody": report.melody(result.composition),
-            "patterns": report.patterns(result.composition),
-            "taste": report.taste(result.composition),
-            "plan": report.plan(result.composition),
-            "ledger": report.ledger(result.composition),
-            "ghosts": report.ghosts(result.composition, knobs.ghost_gain),
-            "memory": report.memory(result.composition, result.memory),
-            "tuning": report.tuning(result.composition),
-            "clocks": report.clocks(result.composition),
-            "heard": report.heard(result.composition),
-            "timbre": report.timbre(result.composition),
-            "mix": report.mix(result.mix),
-            "hindsight": report.hindsight(result.composition),
+            **report.everything(result, knobs.ghost_gain),
+        }
+
+    def _save(self, payload: dict) -> dict:
+        """File the track on screen: audio, formula, report and every stem.
+
+        One button rather than four, because the three artifacts are only
+        useful together — a stem with no formula beside it is an orphan, and
+        the whole point of the library layout is that one name finds all of it.
+        """
+        audio_format = str(payload.get("format") or "wav").lower()
+        if audio_format not in encode.FORMATS:
+            raise ValueError(f"unknown format {audio_format!r}")
+
+        with _LAST_LOCK:
+            result = _LAST.get("result")
+            knobs = _LAST.get("knobs")
+        if result is None:
+            raise ValueError("nothing to save yet — make a track first")
+
+        shelved = library.save(result, audio_format, stems=True,
+                               report_json=report.everything(result, knobs.ghost_gain))
+        return {
+            "ok": True,
+            "name": shelved["name"],
+            "track": library.relative(shelved["audio"]),
+            "formula": library.relative(shelved["formula"]),
+            "report": library.relative(shelved["report"]),
+            "stems": [library.relative(one) for one in shelved["stems"]],
+            "root": library.relative(MUSIC_DIR),
         }
 
     def _email(self, payload: dict) -> dict:

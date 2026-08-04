@@ -211,16 +211,45 @@ measured moving what it claims to move was deleted rather than shipped.
   structural levers. Two earlier designs for this measured at nothing and were
   deleted; both are documented on the living page.
 
-## Stems
+## Where finished work goes
 
-```bash
-compex make --mood melancholy --stems
+`out/` is a scratch directory — everything flat, named by mood and seed. The
+**library** is for work you want to keep: three parallel trees under
+`~/Music/CompEx`, with the *same folder name in each*, so finding a track tells
+you where its stems and its formula are.
+
+```
+~/Music/CompEx/
+├── Tracks/2026-08-04_melancholy_seed249984309_1971295d/
+│           └── 2026-08-04_melancholy_seed249984309_1971295d.wav
+├── Stems/2026-08-04_melancholy_seed249984309_1971295d/
+│           ├── master.wav  ghosts.wav  kick.wav  pad_bowed_2.wav …
+└── TrackMeta/2026-08-04_melancholy_seed249984309_1971295d/
+            ├── formula.tex
+            └── report.json
 ```
 
-Writes every voice as its own file at exactly the level it has in the mix —
-trims applied, sidechain applied — plus a `ghosts` stem when that knob is up.
-They are the buses that actually went in rather than the voices re-recorded
-alone, so they sum back to the master to within the mastering stage.
+The date comes first so a file browser sorts by when you made it. The
+fingerprint comes last because it is the only part that means anything precise:
+same fingerprint, same recording.
+
+In the app, **Make it** is a preview that files nothing, and **Save** writes all
+three at once in whichever format is selected. From the command line:
+
+```bash
+compex make --mood melancholy --library --stems
+```
+
+**Stems** are every voice as its own file at exactly the level it has in the
+mix — trims applied, sidechain applied — plus a `ghosts` stem carrying the lines
+and grooves it decided against. They are the buses that actually went in rather
+than the voices re-recorded alone, so they sum back to the master to within the
+mastering stage.
+
+**`report.json`** is the whole description of the piece: every movement, the
+evolution, the melody and pattern auditions, the ledger, the ghosts, the plan,
+the tuning and the mix. Both surfaces write it from the same call, so the file
+beside a track cannot drift from what the app was showing when you saved it.
 
 ## Determinism
 

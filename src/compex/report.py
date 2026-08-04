@@ -397,3 +397,32 @@ def plan(composition: Composition) -> dict:
                    for name in sorted(spans)],
         "gave_up": len(composition.ledger.given_up),
     }
+
+
+def everything(result, ghost_gain: float = 0.0) -> dict:
+    """Every section, once, for whoever needs the whole description.
+
+    Both surfaces render a track from this and the library writes it to
+    ``TrackMeta/``, so the file saved beside a track cannot drift from what you
+    were looking at when you saved it. It takes a ``RenderResult`` rather than a
+    ``Composition`` because two of the sections — the mix and what the engine
+    learned — are properties of the render, not of the decisions.
+    """
+    composition = result.composition
+    return {
+        "movements": movements(composition),
+        "evolution": evolution(composition),
+        "melody": melody(composition),
+        "patterns": patterns(composition),
+        "taste": taste(composition),
+        "plan": plan(composition),
+        "ledger": ledger(composition),
+        "ghosts": ghosts(composition, ghost_gain),
+        "memory": memory(composition, result.memory),
+        "tuning": tuning(composition),
+        "clocks": clocks(composition),
+        "heard": heard(composition),
+        "timbre": timbre(composition),
+        "mix": mix(result.mix),
+        "hindsight": hindsight(composition),
+    }

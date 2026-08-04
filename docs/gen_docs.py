@@ -2136,10 +2136,12 @@ pieces. Every one of those numbers is about the machine's internals. Whether a p
 <code>unravel</code> is <i>heard</i> as coming apart, rather than merely as one that got busier,
 is the question that measurement cannot reach. See <b>The plan</b>.</div>
 
-<div class="read ok"><b>Stems, since they were asked for.</b> <code>--stems</code> writes every
-voice as its own file at exactly the level it has in the mix — trims applied, sidechain applied.
-They are the buses that actually went in, not the voices re-recorded alone, which is the property
-that makes them usable: they sum back to the master to within the mastering stage.</div>
+<div class="read ok"><b>The pieces come apart now.</b> Saving a track writes it three ways at
+once — the master, every voice as its own stem, and the formula with a full JSON report beside it —
+into three parallel folders that share one name, so finding a track tells you where its parts are.
+A stem is the bus that actually went in, not the voice re-recorded alone: trims applied, sidechain
+applied, and the ghosts on their own channel. They sum back to the master to within the mastering
+stage, which is the property that makes them usable in something else.</div>
 
 <div class="q"><b>The plan has a deadband.</b> Both of its strong levers are whole numbers — one
 more candidate in the audition, one more octave between voices — so on some pieces it asks for a

@@ -22,6 +22,15 @@ SAMPLE_WIDTH_BYTES = 2  # 16-bit PCM
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = Path.home() / "compex" / "out"
 
+#: The library: finished work, three parallel trees with the same folder name
+#: in each, so finding a track tells you where its stems and its formula are.
+#: ``OUTPUT_DIR`` stays what it always was — a flat scratch directory for the
+#: CLI and for anything mid-experiment.
+MUSIC_DIR = Path.home() / "Music" / "CompEx"
+TRACKS_DIR = MUSIC_DIR / "Tracks"
+STEMS_DIR = MUSIC_DIR / "Stems"
+TRACK_META_DIR = MUSIC_DIR / "TrackMeta"
+
 #: Where the engine keeps what it remembers between pieces. A plain JSON file
 #: on purpose: it is an input to composition, so it has to be something you can
 #: read, diff, copy to another machine, or delete when you want the engine to
