@@ -149,8 +149,56 @@ def band_energy(signal: np.ndarray, sample_rate: int) -> tuple[float, ...]:
                  for low, high in BANDS)
 
 
+#: The crest factor of an ordinary percussive sound — a snare, measured. A
+#: voice sharper than this is heard out of proportion to the energy it carries;
+#: a voice flatter than it is heard about as its energy says.
+REFERENCE_CREST = 3.0
+
+#: How far a voice's sharpness is allowed to move the mixer's opinion of it.
+#: Clamped at both ends because this is a correction to a measurement, not a
+#: licence for it to decide the mix on its own.
+SALIENCE_BOUNDS = (0.6, 3.0)
+
+
+def salience(signal: np.ndarray, sample_rate: int, window: float = 0.4) -> float:
+    """How loud this sound is *heard*, against how much energy it carries.
+
+    The mixer used to answer "is this voice buried?" with band energy alone,
+    and for anything percussive that is the wrong question asked confidently.
+    A wood block carries almost no energy — it is over in a tenth of a second —
+    so the mixer read it as drowned and lifted it by the maximum it was allowed,
+    while a listener heard the loudest thing in the piece. Measured on one real
+    track: **the rim got a 2.60x boost, the conga 2.60x, the kick 2.09x**, all
+    of them already the tallest things in the mix. The mixer was not failing to
+    fix the problem, it was causing it.
+
+    Sharpness is the missing term. A transient is heard out of proportion to
+    its energy — the same fact that put :data:`fx.CREST_TILT` in the level
+    normaliser — and it is measurable as peak against a fixed-window RMS. The
+    window is fixed on purpose: it must not shrink to fit the sound, because
+    the ear's does not.
+
+    Returns a multiplier on apparent amplitude: 1.0 for an ordinary drum, above
+    it for something sharper, below it for something flat and sustained.
+    """
+    if len(signal) < 32:
+        return 1.0
+    peak = float(np.max(np.abs(signal)))
+    span = max(1, int(window * sample_rate))
+    if len(signal) <= span:
+        level = float(np.sqrt(np.sum(signal ** 2) / span))
+    else:
+        energy = np.concatenate(([0.0], np.cumsum(signal ** 2)))
+        level = float(np.sqrt(max(0.0, (energy[span:] - energy[:-span]).max()) / span))
+    if level <= 1e-9 or peak <= 1e-9:
+        return 1.0
+    low, high = SALIENCE_BOUNDS
+    return max(low, min(high, (peak / level) / REFERENCE_CREST))
+
+
 def weigh(energies: dict[str, tuple[str, tuple[float, ...], float]],
-          played: dict[str, float] | None = None) -> Mix:
+          played: dict[str, float] | None = None,
+          protected: frozenset[str] = frozenset()) -> Mix:
     """Turn per-voice band energies into shares, and shares into trims.
 
     ``energies`` maps voice id to (role, per-band energy, current gain), the
@@ -173,7 +221,12 @@ def weigh(energies: dict[str, tuple[str, tuple[float, ...], float]],
         voices.append(Presence(voice=name, role=role, energy=energy, share=share,
                                presence=min(1.0, (played or {}).get(name, busiest) / busiest)))
 
-    voices = [replace(presence, trim=_trim_for(presence)) for presence in voices]
+    # ``protected`` voices may still be trimmed *down* if they are swamping
+    # something, but never up: whatever clears space for them has already done
+    # it, and lifting them again counts the same room twice.
+    voices = [replace(presence, trim=min(_trim_for(presence), 1.0)
+                      if presence.voice in protected else _trim_for(presence))
+              for presence in voices]
 
     # What the trims actually bought, measured the same way as the diagnosis.
     settled = [[presence.energy[band] * presence.trim ** 2 for band in range(len(BANDS))]

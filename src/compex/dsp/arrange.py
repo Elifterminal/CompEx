@@ -31,6 +31,12 @@ MIN_KIT_TRIM = 0.45
 #: as a second line competing with it, which is the difference between a haze
 #: and a mess.
 GHOST_CUTOFF = 1800.0
+
+#: The voices the sidechain ducks everything else under. They are named here
+#: rather than inline because the mixer has to know about them: a voice the
+#: duck already clears a hole for must not *also* be trimmed up for finding its
+#: band crowded, which is the same room counted twice.
+DUCK_TRIGGERS = frozenset({"kick", "boom"})
 VARIANTS = 3           # one-shot variants per voice, cycled so repeats still vary
 DUCK_DEPTH = 0.42
 DUCK_RELEASE = 0.055
@@ -77,10 +83,17 @@ def survey(composition: Composition, sample_rate: int = SAMPLE_RATE) -> balance.
                 sample = effects.apply_chain(sample, sample_rate, spec.effects)
             gain = spec.gain
         bands = balance.band_energy(sample, sample_rate)
-        scale = weight * gain * gain
+        # Squared, like the gain beside it: these are energies, and salience is
+        # a correction to apparent *amplitude*.
+        sharp = balance.salience(sample, sample_rate)
+        scale = weight * gain * gain * sharp * sharp
         energies[voice_id] = (spec.role, tuple(value * scale for value in bands), gain)
 
-    return balance.weigh(energies, played)
+    # A kick is never buried — everything else is ducked out of its way on
+    # every hit. Measured before this line existed: the mixer read the low band
+    # as crowded (a pad and a bass live there), decided the kick was losing it,
+    # and applied the maximum lift on top of the hole the duck had already cut.
+    return balance.weigh(energies, played, protected=DUCK_TRIGGERS)
 
 
 def render_composition(composition: Composition, master_gain: float = 0.89,
@@ -129,14 +142,69 @@ def render_composition(composition: Composition, master_gain: float = 0.89,
     return master
 
 
+def render_stems(composition: Composition, master_gain: float = 0.89,
+                 ghost_gain: float = 0.0) -> dict[str, np.ndarray]:
+    """Every voice on its own, at exactly the level it has in the mix.
+
+    Summing these gives the master back to within the mastering stage, which is
+    the property that makes them useful: a stem is not a re-render of the voice
+    in isolation, it is the thing that actually went in. Anything else and the
+    stems are a different piece that happens to sound similar.
+
+    Keys are voice ids, plus ``ghosts`` for the lines and grooves it decided
+    against and ``master`` for the finished mix.
+    """
+    if not 0.0 < master_gain <= 1.0:
+        raise ValueError(f"master_gain must be in (0, 1], got {master_gain}")
+    if not 0.0 <= ghost_gain <= 1.0:
+        raise ValueError(f"ghost_gain must be in [0, 1], got {ghost_gain}")
+
+    seconds_per_beat = composition.seconds_per_beat
+    total = int((composition.total_seconds + TAIL_SECONDS) * SAMPLE_RATE)
+    if total <= 0:
+        raise ValueError("composition has no length")
+
+    mix = survey(composition)
+    trims = mix.trims()
+    stems: dict[str, np.ndarray] = {}
+
+    for voice in composition.voices:
+        bus = np.zeros(total, dtype=np.float64)
+        if voice.role == ROLE_PERC:
+            _render_strokes(bus, composition, seconds_per_beat, trims, only=voice.voice_id)
+        else:
+            _render_voices(bus, composition, seconds_per_beat, None, trims,
+                           only=voice.voice_id)
+        if np.any(bus):
+            stems[voice.voice_id] = bus
+
+    if ghost_gain > 0 and (composition.ghosts or composition.ghost_strokes):
+        stems["ghosts"] = _render_ghosts(total, composition, seconds_per_beat) * ghost_gain
+
+    # The sidechain is a property of the mix, not of any one voice, so it is
+    # applied to the melodic stems the same way the master applies it. Without
+    # this the stems would sum to something the master never was.
+    duck = _sidechain(total, composition, seconds_per_beat)
+    percussive = {voice.voice_id for voice in composition.voices if voice.role == ROLE_PERC}
+    for name, bus in stems.items():
+        if name not in percussive:
+            stems[name] = bus * duck
+
+    stems["master"] = render_composition(composition, master_gain, None, ghost_gain)
+    return stems
+
+
 def _render_voices(bus: np.ndarray, composition: Composition, seconds_per_beat: float,
-                   progress: ProgressFn, trims: dict[str, float] | None = None) -> None:
+                   progress: ProgressFn, trims: dict[str, float] | None = None,
+                   only: str | None = None) -> None:
     """One voice at a time: synthesise its notes, run its effects, fold it in."""
     # Grouped by (voice, state), not by voice: an instrument drifts as the
     # piece goes, so the same voice is several instruments over eight minutes
     # and each one has to be rendered as what it was at the time.
     grouped: dict[tuple[str, int], list] = {}
     for note in composition.notes:
+        if only is not None and note.voice != only:
+            continue
         grouped.setdefault((note.voice, note.timbre), []).append(note)
 
     for position, ((voice_id, timbre), notes) in enumerate(grouped.items()):
@@ -183,14 +251,15 @@ def kit_trim(count: int) -> float:
 
 
 def _render_strokes(bus: np.ndarray, composition: Composition,
-                    seconds_per_beat: float, trims: dict[str, float] | None = None) -> None:
+                    seconds_per_beat: float, trims: dict[str, float] | None = None,
+                    only: str | None = None) -> None:
     kit = {voice.voice_id: voice for voice in composition.voices if voice.role == ROLE_PERC}
     trim = kit_trim(len(kit))
     cache: dict[tuple[str, int], np.ndarray] = {}
 
     for position, stroke in enumerate(composition.strokes):
         spec = kit.get(stroke.voice)
-        if spec is None:
+        if spec is None or (only is not None and stroke.voice != only):
             continue
         variant = position % VARIANTS
         key = (stroke.voice, variant)
@@ -264,7 +333,7 @@ def _ghost_strokes(bus: np.ndarray, composition: Composition,
 def _sidechain(total: int, composition: Composition, seconds_per_beat: float) -> np.ndarray:
     """Duck the melodic bus under every kick. Without it the low end turns to mud."""
     duck = np.ones(total, dtype=np.float64)
-    kicks = [stroke for stroke in composition.strokes if stroke.voice in {"kick", "boom"}]
+    kicks = [stroke for stroke in composition.strokes if stroke.voice in DUCK_TRIGGERS]
     if not kicks:
         return duck
 

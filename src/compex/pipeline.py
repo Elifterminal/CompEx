@@ -15,7 +15,13 @@ import numpy as np
 
 from compex.audio import encode, write_wav
 from compex.config import SAMPLE_RATE, Knobs
-from compex.dsp.arrange import ProgressFn, render_composition, survey
+from compex.dsp import fx
+from compex.dsp.arrange import (
+    ProgressFn,
+    render_composition,
+    render_stems,
+    survey,
+)
 from compex.dsp.balance import Mix
 from compex.generate import Composition, Mood, compose
 from compex.remember import Memory, learn
@@ -57,6 +63,35 @@ class RenderResult:
         mp3_path = encode.to_mp3(wav_path)
         wav_path.unlink(missing_ok=True)  # the WAV was only scaffolding for the encoder
         return mp3_path
+
+    def save_stems(self, directory: str | Path, audio_format: str = "wav") -> list[Path]:
+        """Write every voice as its own file, at the level it has in the mix.
+
+        Rendered rather than stored, because keeping a stem per voice in memory
+        for a ten-minute piece is a gigabyte of float64 nobody asked for. The
+        sum of the stems is the master to within the mastering stage — they are
+        the buses that actually went in, not the voices re-recorded alone.
+        """
+        fmt = str(audio_format).lower().strip()
+        if fmt not in encode.FORMATS:
+            raise ValueError(f"unknown format {audio_format!r}; use one of {encode.FORMATS}")
+
+        target = Path(directory).expanduser()
+        target.mkdir(parents=True, exist_ok=True)
+        stems = render_stems(self.composition, self.knobs.master_gain,
+                             self.knobs.ghost_gain)
+
+        written: list[Path] = []
+        for name, samples in sorted(stems.items()):
+            safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+            wav_path = write_wav(target / f"{safe}.wav", fx.peak_normalise(samples, 0.97)
+                                 if name != "master" else samples)
+            if fmt == "mp3":
+                written.append(encode.to_mp3(wav_path))
+                wav_path.unlink(missing_ok=True)
+            else:
+                written.append(wav_path)
+        return written
 
     def save_formula(self, path: str | Path) -> Path:
         destination = Path(path).expanduser().with_suffix(".tex")

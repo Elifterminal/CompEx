@@ -9,8 +9,9 @@ import numpy as np
 
 from compex.audio import encode
 from compex.config import SAMPLE_RATE, KnobError, Knobs
-from compex.generate import THEMES
+from compex.generate import THEMES, compose
 from compex.notation import ReentryError, read_formula
+from compex.dsp.arrange import render_stems
 from compex.pipeline import make_track
 
 FAST = Knobs(seed=1203, duration_s=20.0)
@@ -149,3 +150,55 @@ class SaveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StemTests(unittest.TestCase):
+    """Stems have to be the buses that actually went in, not a re-record.
+
+    If a stem were the voice rendered in isolation it would be a different
+    piece that happens to sound similar — no trims, no duck — and useless for
+    putting the part into anything else.
+    """
+
+    def test_the_stems_sum_to_the_master(self):
+        piece = compose(249984309, 30.0, THEMES["melancholy"])
+        stems = render_stems(piece, 0.89, 0.45)
+        summed = sum(bus for name, bus in stems.items() if name != "master")
+        master = stems["master"]
+        # The master is peak-normalised and limited, so compare shape.
+        self.assertGreater(float(np.corrcoef(summed, master)[0, 1]), 0.99)
+
+    def test_every_voice_that_plays_gets_a_stem(self):
+        piece = compose(249984309, 30.0, THEMES["melancholy"])
+        stems = render_stems(piece, 0.89, 0.0)
+        playing = {note.voice for note in piece.notes} | {s.voice for s in piece.strokes}
+        for voice in playing:
+            self.assertIn(voice, stems, voice)
+        self.assertNotIn("ghosts", stems)   # switched off
+
+    def test_a_stem_holds_only_its_own_voice(self):
+        piece = compose(249984309, 30.0, THEMES["melancholy"])
+        stems = render_stems(piece, 0.89, 0.0)
+        quiet = [name for name, bus in stems.items()
+                 if name != "master" and not np.any(bus)]
+        self.assertEqual(quiet, [])
+        # Two different voices cannot be the same signal.
+        names = [n for n in stems if n != "master"]
+        self.assertFalse(np.array_equal(stems[names[0]], stems[names[1]]))
+
+    def test_they_are_written_to_disk(self):
+        import tempfile
+
+        result = make_track(Knobs(seed=249984309, duration_s=20.0, ghost_gain=0.45),
+                            THEMES["melancholy"])
+        with tempfile.TemporaryDirectory() as where:
+            paths = result.save_stems(where)
+            self.assertTrue(paths)
+            for path in paths:
+                self.assertTrue(Path(path).exists())
+                self.assertGreater(Path(path).stat().st_size, 1000)
+
+    def test_the_ghost_stem_follows_the_knob(self):
+        piece = compose(249984309, 30.0, THEMES["melancholy"])
+        self.assertIn("ghosts", render_stems(piece, 0.89, 0.45))
+        self.assertNotIn("ghosts", render_stems(piece, 0.89, 0.0))

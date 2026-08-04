@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+from compex.dsp import balance
+
 from compex.config import SAMPLE_RATE
 from compex.dsp import arrange, fx
 from compex.dsp.balance import (
@@ -241,3 +243,73 @@ class CrowdingTests(unittest.TestCase):
             return total
 
         self.assertLess(crowding_at(1.5), crowding_at(0.0))
+
+
+class SalienceTests(unittest.TestCase):
+    """Sharpness, which the mixer used to be blind to.
+
+    Presence was measured as band energy alone, and for anything percussive
+    that is the wrong question asked confidently: a wood block carries almost
+    no energy, so the mixer read it as drowned and lifted it by the maximum it
+    was allowed, while a listener heard the loudest thing in the piece.
+    """
+
+    def test_a_click_reads_as_more_present_than_its_energy(self):
+        rate = 48000
+        click = np.zeros(rate)
+        click[:400] = np.hanning(800)[:400]
+        sustained = np.sin(2 * np.pi * 220 * np.arange(rate) / rate) * 0.5
+        self.assertGreater(balance.salience(click, rate),
+                           balance.salience(sustained, rate))
+
+    def test_it_stays_inside_its_bounds(self):
+        rate = 48000
+        low, high = balance.SALIENCE_BOUNDS
+        for signal in (np.zeros(rate),
+                       np.ones(rate),
+                       np.concatenate(([1.0], np.zeros(rate - 1))),
+                       np.random.default_rng(7).normal(size=rate)):
+            self.assertTrue(low <= balance.salience(signal, rate) <= high)
+
+    def test_silence_and_scraps_do_not_crash(self):
+        self.assertEqual(balance.salience(np.zeros(4), 48000), 1.0)
+        self.assertEqual(balance.salience(np.array([]), 48000), 1.0)
+
+    def test_a_scaled_copy_is_equally_salient(self):
+        """Salience is a shape, not a level — otherwise it double-counts gain."""
+        rate = 48000
+        signal = np.zeros(rate)
+        signal[:200] = np.hanning(400)[:200]
+        self.assertAlmostEqual(balance.salience(signal, rate),
+                               balance.salience(signal * 0.1, rate), places=6)
+
+
+class ProtectedVoiceTests(unittest.TestCase):
+    """A voice the sidechain already clears a hole for is not also lifted."""
+
+    def test_a_protected_voice_is_never_trimmed_up(self):
+        energies = {
+            "kick": ("perc", (0.01, 0.0, 0.0, 0.0, 0.0), 1.0),
+            "pad": ("pad", (1.0, 1.0, 0.2, 0.0, 0.0), 1.0),
+        }
+        played = {"kick": 1.0, "pad": 1.0}
+        loose = balance.weigh(energies, played)
+        held = balance.weigh(energies, played, protected=frozenset({"kick"}))
+        self.assertGreater(loose.trims().get("kick", 1.0), 1.0)
+        self.assertLessEqual(held.trims().get("kick", 1.0), 1.0)
+
+    def test_it_can_still_be_trimmed_down(self):
+        """Protection is against double-counting room, not a floor."""
+        energies = {
+            "kick": ("perc", (9.0, 4.0, 1.0, 0.0, 0.0), 1.0),
+            "pad": ("pad", (0.01, 0.01, 0.0, 0.0, 0.0), 1.0),
+        }
+        played = {"kick": 1.0, "pad": 1.0}
+        held = balance.weigh(energies, played, protected=frozenset({"kick"}))
+        self.assertLessEqual(held.trims().get("kick", 1.0), 1.0)
+
+    def test_the_duck_triggers_are_the_protected_ones(self):
+        from compex.dsp.arrange import DUCK_TRIGGERS
+
+        self.assertIn("kick", DUCK_TRIGGERS)
+        self.assertIn("boom", DUCK_TRIGGERS)

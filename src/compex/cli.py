@@ -35,6 +35,9 @@ def _build_parser() -> argparse.ArgumentParser:
     make.add_argument("-o", "--out", help="output path (extension set by --format)")
     make.add_argument("--email", nargs="?", const=DEFAULT_RECIPIENT,
                       help=f"email the result (default {DEFAULT_RECIPIENT})")
+    make.add_argument("--stems", nargs="?", const="", metavar="DIR",
+                      help="also write every voice as its own file, at the level it has "
+                           "in the mix (default: a stems/ folder beside the track)")
     make.add_argument("-q", "--quiet", action="store_true")
 
     replay = subs.add_parser("replay", help="re-render a track from its formula file")
@@ -84,10 +87,17 @@ def _make(args: argparse.Namespace) -> int:
     path = result.save(destination, args.format)
     formula_path = result.save_formula(destination)
 
+    stems: list[Path] = []
+    if args.stems is not None:
+        where = Path(args.stems) if args.stems else Path(destination).with_suffix("") / "stems"
+        stems = result.save_stems(where, args.format)
+
     if not args.quiet:
         print(result.composition.summary())
         print(f"\nwrote {path}")
         print(f"      {formula_path}")
+        for stem_path in stems:
+            print(f"      {stem_path}")
 
     if args.email:
         try:
